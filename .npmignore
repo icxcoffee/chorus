@@ -1,0 +1,8 @@
+.ai/
+.idea/
+.npm-cache/
+node_modules/
+tests/
+*.iml
+.DS_Store
+*.log
