@@ -1,6 +1,27 @@
 # Chorus
 
+[![npm version](https://img.shields.io/npm/v/@icxcoffee/chorus?style=flat-square)](https://www.npmjs.com/package/@icxcoffee/chorus)
+[![npm downloads](https://img.shields.io/npm/dm/@icxcoffee/chorus?style=flat-square)](https://www.npmjs.com/package/@icxcoffee/chorus)
+[![license](https://img.shields.io/npm/l/@icxcoffee/chorus?style=flat-square)](https://github.com/icxcoffee/chorus/blob/main/LICENSE)
+[![GitHub release](https://img.shields.io/github/v/release/icxcoffee/chorus?style=flat-square)](https://github.com/icxcoffee/chorus/releases/latest)
+
 Chorus is a Pi extension that sends one prompt to multiple LLM voices in parallel, then asks a distinct conductor model to synthesize the successful responses.
+
+## Installation
+
+Install from npm as a Pi package:
+
+```bash
+pi install npm:@icxcoffee/chorus
+```
+
+Or try it without modifying settings:
+
+```bash
+pi -e npm:@icxcoffee/chorus
+```
+
+Once installed, the `/chorus` slash commands and the `chorus_answer` tool are available in any Pi session.
 
 ## Development
 
