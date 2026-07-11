@@ -5,6 +5,20 @@ All notable changes to Chorus are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.2] - 2026-07-11
+
+### Added
+
+- Chinese translation of the README (`README.zh-CN.md`), linked from the English README via a language switcher. Shipped in the npm tarball alongside `README.md`.
+
+### Changed
+
+- Sync `package-lock.json` to `@earendil-works/pi-ai@0.80.6` so `npm ci` succeeds in CI (the 0.1.1 lockfile still pinned 0.80.3 while `package.json` required `>=0.80.6`).
+- Remove `SECURITY.md`; vulnerability reporting now relies solely on GitHub Private Vulnerability Reporting (the PVR button works independently of this file).
+- Gitignore local-only `AGENTS.md` (AI operational notes, not shipped).
+
+[0.1.2]: https://github.com/icxcoffee/chorus/releases/tag/v0.1.2
+
 ## [0.1.1] - 2026-07-11
 
 ### Security

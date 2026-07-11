@@ -1,6 +1,6 @@
 {
   "name": "@icxcoffee/chorus",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Pi extension that fans a prompt out to multiple LLM voices in parallel, then asks a distinct conductor model to synthesize the successful responses.",
   "private": false,
   "type": "module",
@@ -24,7 +24,9 @@
     "verify": "npm run lint && npm run typecheck && npm run test"
   },
   "pi": {
-    "extensions": ["./dist/index.js"]
+    "extensions": [
+      "./dist/index.js"
+    ]
   },
   "keywords": [
     "pi-package",
