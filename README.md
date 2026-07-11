@@ -187,6 +187,25 @@ Use config commands to switch mode and timeouts:
 
 `/chorus config timeout <duration>` remains a shorthand for the voice/agent timeout. Durations accept milliseconds, `Ns`, `Nm`, `Nh`, or `default`.
 
+## Ask vs. agent
+
+`/chorus ask` and `/chorus agent` are **not** a "direct mode" / "subagent mode" pair — they are two different run shapes:
+
+- **`/chorus ask`** runs the active preset's voices and synthesizes the responses. The preset's `mode` (direct or subagent, configured via `/chorus config mode`) decides how each voice is invoked. Use it for free-form questions where code-repo access is not needed.
+- **`/chorus agent`** is always subagent mode and always codebase-aware: child agents run with full tool access (read files, bash, git, etc.) and produce evidence under `results/<jobId>/`. A separate **main verification conductor** then runs as a fresh agent over the evidence file to verify or reject the child agents' claims. Use it for tasks that need the agents to actually explore the repo.
+
+Other concrete differences:
+
+| | `/chorus ask` | `/chorus agent` |
+| --- | --- | --- |
+| Mode | preset's `mode` (configurable) | hardcoded `subagent` |
+| Synthesis | simple conductor over voice outputs | main verification agent over evidence |
+| Codebase access | only in subagent mode | always |
+| Persisted artifacts | per-voice output + synthesis | `request.md`, `main-agent-input.md`, `agent-N.md`, `agent-N-activity.md`, `main-agent-activity.md`, `final-report.md`, `result.json` |
+| Conductor session | isolated (no parent chat) | isolated (only the evidence file) |
+
+In short: pick `ask` for "compare answers from these N models" and `agent` for "have N agents investigate this repo and verify each other".
+
 ## Configuration And History
 
 Config and history live under `~/.pi/agent/chorus/`:

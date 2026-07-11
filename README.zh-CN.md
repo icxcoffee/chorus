@@ -187,6 +187,25 @@ Direct（直连）模式通过适配器调用各 provider 的 API，并根据 pr
 
 `/chorus config timeout <duration>` 仍是 voice / agent 超时的简写。时长支持毫秒、`Ns`、`Nm`、`Nh` 或 `default`。
 
+## Ask vs. agent
+
+`/chorus ask` 和 `/chorus agent` **不是** "direct 模式 / subagent 模式" 的对应关系——它们是两种不同的运行形态：
+
+- **`/chorus ask`** 运行当前激活预设里的 voice，再综合它们的响应。预设的 `mode`（direct 或 subagent，通过 `/chorus config mode` 配置）决定每个 voice 如何被调用。用于不需要访问代码仓库的开放性问题。
+- **`/chorus agent`** 始终是 subagent 模式，且始终感知代码库：子智能体拥有完整工具权限（读文件、bash、git 等），产出证据文件存到 `results/<jobId>/`。随后一个独立的**主校验 conductor** 作为全新 agent 在证据文件上运行，逐条验证或否决子智能体的结论。用于需要智能体实际去探索代码库的任务。
+
+其他具体差异：
+
+| | `/chorus ask` | `/chorus agent` |
+| --- | --- | --- |
+| Mode | 预设的 `mode`（可配） | 硬编码 `subagent` |
+| 综合方式 | 在 voice 输出上做简单综合 | 在证据文件上跑主校验 agent |
+| 代码库访问 | 仅 subagent 模式下有 | 始终有 |
+| 持久化产物 | 每个 voice 的输出 + 综合结果 | `request.md`、`main-agent-input.md`、`agent-N.md`、`agent-N-activity.md`、`main-agent-activity.md`、`final-report.md`、`result.json` |
+| conductor 会话 | 隔离（看不到父对话） | 隔离（只能看证据文件） |
+
+一句话：`ask` 适合"让 N 个模型各答一遍并对比"；`agent` 适合"让 N 个智能体实际调研代码库并互相校验"。
+
 ## 配置与历史
 
 配置和历史存放在 `~/.pi/agent/chorus/` 下：
