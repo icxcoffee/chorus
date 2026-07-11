@@ -9,6 +9,42 @@
 
 Chorus 是一个 Pi 扩展，它把同一个 prompt 并行发送给多个 LLM "voice"（声音），再由一个独立的 conductor（指挥）模型把成功的响应综合成最终答案。
 
+## 示例
+
+同一个 prompt 并行发送给多个 voice，再由独立的 conductor 模型综合出**共识**、**分歧**和**最终答案**。
+
+```text
+/chorus ask 你怎么看待pi agent
+```
+
+```text
+# Chorus Result
+Preset: default | Voices: 2/2 | Duration: 46.6s | Cost: $0.008
+
+## Final Answer
+
+### Consensus
+- 两个声音都高度赞赏 pi 的代码导航与理解能力，特别提到 `ast-grep`/`tree-sitter`/LSP 以及 `module_report` / `read_symbol` 等工具，认为比传统 grep 或读取整个文件精确高效得多。
+- 双方都认可 pi 的 "read-before-edit"（读后保护）机制，要求修改代码前必须先读取相关符号，防止 AI 凭空瞎改。
+- 两个声音都肯定了 pi 的扩展体系（Skills、Extensions、Custom Tools/Providers）以及多代理编排能力。
+- 双方一致认为 pi 是实用主义、工具向、符合 AI 工作方式的 coding 框架，不花哨但长期可用。
+
+### Disagreements
+- **子代理的上下文与控制**：voice[0] 赞扬子代理可通过 `small / medium / big` 显式分级控制成本和质量；voice[1]（自称该功能作者）吐槽子代理每次都是全新上下文，没有自动继承父 session 的 code context。
+- **安全机制的“度”**：voice[0] 认为工具 API 设计“相对克制，只暴露必要面”；voice[1] 觉得部分安全设计（如 `ast_grep_replace` 默认 dry-run、`edit` 要求精确匹配）偶尔“过度保护”。
+- **任务执行模式**：voice[0] 指出 pi 缺乏显式的“先 plan 再执行”两段式主路径；voice[1] 则更侧重称赞其 token 效率和 turn-end advisory 提醒。
+
+### Final Answer
+作为运行在 pi 内部的 AI 视角，双方对 pi 的评价整体高度赞赏且务实。pi 的核心优势在于原生的代码理解能力与工具化设计——它没有简单地把 IDE 按钮暴露给 AI，而是提供了基于 `ast-grep`、LSP、`tree-sitter` 的工具原语（如 `module_report`、`read_symbol`），配合严格的 read-before-edit 守卫。仍需打磨的是子代理上下文传递，以及安全默认值与效率之间的平衡。
+
+## Run Summary
+- OK voice[0] minimax-cn/MiniMax-M3 | 17.7s | $0.008
+- OK voice[1] custom-ark-cn-beijing-volces-com/deepseek-v4-flash | 18.2s | $0.000
+- OK conductor | $0.000
+```
+
+每个 voice 的完整输出持久化在 `~/.pi/agent/chorus/results/<jobId>/`，可用 `/chorus watch <jobId>` 实时查看。
+
 ## 安装
 
 以 Pi 包的形式从 npm 安装：

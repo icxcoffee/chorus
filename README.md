@@ -9,6 +9,42 @@
 
 Chorus is a Pi extension that sends one prompt to multiple LLM voices in parallel, then asks a distinct conductor model to synthesize the successful responses.
 
+## Example
+
+One prompt is fanned out to multiple voices in parallel; a distinct conductor model then synthesizes **consensus**, **disagreements**, and a **final answer**.
+
+```text
+/chorus ask what do you think of pi agent
+```
+
+```text
+# Chorus Result
+Preset: default | Voices: 2/2 | Duration: 46.6s | Cost: $0.008
+
+## Final Answer
+
+### Consensus
+- Both voices praise pi's native code-understanding stack — `ast-grep` / tree-sitter / LSP, plus `module_report` and `read_symbol` — as far more precise than grep or reading whole files.
+- Both acknowledge the read-before-edit guard that blocks editing a symbol until it has been read.
+- Both affirm the extension system (Skills, Extensions, Custom Tools) and the multi-agent orchestration story.
+- Both position pi as a pragmatic, tool-oriented, AI-native coding framework — unflashy but durable.
+
+### Disagreements
+- **Subagent context** — voice[0] praises the explicit `small / medium / big` tiering for cost/quality control; voice[1] (its own author) complains subagents start fresh and don't auto-inherit the parent session's code context.
+- **Safety vs. friction** — voice[0] finds the tool API "restrained, exposing only what's needed"; voice[1] feels some defaults (dry-run replace, exact-match edit) are occasionally over-protective.
+- **Execution model** — voice[0] misses an explicit plan-then-execute path; voice[1] instead highlights token efficiency and turn-end advisories.
+
+### Final Answer
+Both voices rate pi highly and pragmatically. Its core strength is native code understanding and a tool-oriented design: rather than exposing IDE buttons, it offers AI-native primitives (AST search, module outlines, subagent orchestration) plus a strict read-before-edit guard. The remaining rough edges are subagent context inheritance and the balance between safety defaults and friction.
+
+## Run Summary
+- OK voice[0] minimax-cn/MiniMax-M3 | 17.7s | $0.008
+- OK voice[1] custom-ark-cn-beijing-volces-com/deepseek-v4-flash | 18.2s | $0.000
+- OK conductor | $0.000
+```
+
+Each voice's full output is persisted under `~/.pi/agent/chorus/results/<jobId>/` and can be watched live with `/chorus watch <jobId>`.
+
 ## Installation
 
 Install from npm as a Pi package:
