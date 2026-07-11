@@ -78,6 +78,29 @@ Consolidate the direct/subagent result assembly behind one helper, and surface c
 
 Child agents write `agent-N.md` + `agent-N-activity.md` (full tool trace); the conductor writes `final-report.md`. All persist under `~/.pi/agent/chorus/results/<jobId>/`.
 
+### Interactive composer (no-arg invocation)
+
+Running `/chorus agent` (or `/chorus ask`) with no arguments opens an interactive composer instead of failing or leaving the prompt empty. You can type or paste the prompt directly, or jump into preset configuration or prompt optimization from the same UI:
+
+```text
+------------------------------------------------------------------------
+ Chorus Agent Task draft
+
+ Agent task
+
+ [Submit]   Config    Optimize    Cancel
+
+ Type/paste prompt - up/down scroll - left/right/tab action - enter confirm - backspace delete - esc cancel
+------------------------------------------------------------------------
+```
+
+- **Submit** runs the prompt through the active preset.
+- **Config** opens the preset manager in-place (also reachable via `/chorus config`); the composer stays open so you can resume typing afterwards.
+- **Optimize** rewrites the prompt with the conductor's optimizer model. After optimizing, the status flips from `draft` to `optimized` and the button label changes to `Optimize again` — select it to re-run the optimizer on the latest text.
+- **Cancel** discards the composer.
+
+`/chorus ask` opens the same UI titled `Chorus Question` with placeholder `Question`. The button row is identical; only the title and placeholder change.
+
 ## Installation
 
 Install from npm as a Pi package:

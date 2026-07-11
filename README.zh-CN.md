@@ -78,6 +78,29 @@ Preset: default | Agents: 2/2 | Duration: 14m | Cost: $0.016
 
 子智能体写入 `agent-N.md` + `agent-N-activity.md`（完整工具轨迹）；conductor 写入 `final-report.md`。全部持久化在 `~/.pi/agent/chorus/results/<jobId>/`。
 
+### 交互式编写器（无参数调用）
+
+不带参数运行 `/chorus agent`（或 `/chorus ask`）会打开一个交互式编写器，而不是失败或留空。你可以直接键入或粘贴 prompt，也可以从同一个界面跳到预设配置或 prompt 优化：
+
+```text
+------------------------------------------------------------------------
+ Chorus Agent Task draft
+
+ Agent task
+
+ [Submit]   Config    Optimize    Cancel
+
+ Type/paste prompt - up/down scroll - left/right/tab action - enter confirm - backspace delete - esc cancel
+------------------------------------------------------------------------
+```
+
+- **Submit** 通过当前预设运行 prompt。
+- **Config** 在原位打开预设管理器（也可通过 `/chorus config` 进入）；编写器不会关闭，配置完后可以接着输入。
+- **Optimize** 用 conductor 的优化器模型重写 prompt。优化后，状态会从 `draft` 翻转为 `optimized`，按钮标签变为 `Optimize again`——选中它可以对最新文本再次运行优化器。
+- **Cancel** 取消编写器。
+
+`/chorus ask` 会打开标题为 `Chorus Question`、占位符为 `Question` 的相同 UI，按钮行一致，仅标题和占位符随命令变化。
+
 ## 安装
 
 以 Pi 包的形式从 npm 安装：
