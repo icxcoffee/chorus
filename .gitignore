@@ -7,3 +7,5 @@ dist/
 *.iml
 # local-only release helper, never committed
 scripts/publish.sh
+# local-only AI operational notes, never committed
+AGENTS.md
