@@ -11,6 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `/chorus-ask`, `/chorus-agent`, and `/chorus-optimize` now parse their arguments identically to their `/chorus ask` / `/chorus agent` / `/chorus optimize` counterparts. Previously the direct aliases passed `args.trim()` straight through, while the subcommand form routed through shell-style quote stripping (`splitCommandArgs`), so quoted or multi-space prompts fed different prompt strings to the voices depending on which alias was used. Both forms now go through the same `joinArgs()` normalization.
 
+### Added
+
+- README: an `/chorus agent` example showing a codebase architecture review - child agents explore the repo and the main verification conductor cross-checks their claims against the actual code (verifying, rejecting, and restating findings).
+- README: document that `/chorus ask` / `/chorus agent` / `/chorus optimize` / `/chorus config` each have an equivalent direct alias (`/chorus-ask`, `/chorus-agent`, `/chorus-optimize`, `/chorus-config`) that parses arguments identically.
+
 ### Changed
 
 - README example uses generic `model A` / `model B` placeholders instead of specific provider/model ids.

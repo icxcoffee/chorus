@@ -45,6 +45,39 @@ Both voices rate pi highly and pragmatically. Its core strength is native code u
 
 Each voice's full output is persisted under `~/.pi/agent/chorus/results/<jobId>/` and can be watched live with `/chorus watch <jobId>`.
 
+### Agent example: architecture review
+
+`/chorus agent` is codebase-aware. Each child agent runs in the repo with full tool access (read files, run builds, trace call paths), then a main verification conductor cross-checks their claims against the actual code.
+
+```text
+/chorus agent review the architecture of this project: where are the seams that could split into modules, and what logic is duplicated across direct and subagent mode?
+```
+
+```text
+# Chorus Result
+Preset: default | Agents: 2/2 | Duration: 14m | Cost: $0.016
+
+## Final Answer
+
+### Verified findings
+- **Mode duplication** - both agents flag that `runDirect` and `runSubagent` re-implement voice fan-out, timeout handling, and cost rollup independently. VERIFIED: `runtime/voice-runner.ts` is shared, but the direct/subagent entry points still duplicate the result-shape assembly.
+- **Hardcoded concurrency** - both agents note voice concurrency is fixed at 3 with no preset override. VERIFIED in `runtime/job-runner.ts`.
+
+### Overstated / rejected
+- Agent[1] claimed `malformedLines` is dead code - INCORRECT, it is thrown in `subagent.ts:141`.
+- Agent[0] framed the registry-empty path as critical; the default `callPiModel` path bypasses it, so real severity is low.
+
+### Final Answer
+Consolidate the direct/subagent result assembly behind one helper, and surface concurrency as a preset field. The two rejected claims show why the verification step matters: agents can be confident and wrong.
+
+## Run Summary
+- OK agent[0] model A | 11m | $0.009
+- OK agent[1] model B | 9m | $0.007
+- OK conductor (main verification) | 3m | $0.000
+```
+
+Child agents write `agent-N.md` + `agent-N-activity.md` (full tool trace); the conductor writes `final-report.md`. All persist under `~/.pi/agent/chorus/results/<jobId>/`.
+
 ## Installation
 
 Install from npm as a Pi package:
@@ -81,6 +114,17 @@ The extension registers:
 - `/chorus cancel <jobId>` aborts a running job.
 - `/chorus optimize [prompt...]` for manual prompt rewriting only.
 - `chorus_answer` with `{ "prompt": string, "presetName"?: string }` for Agent tool use.
+
+The free-text commands each have two equivalent forms - a subcommand and a direct alias - that parse arguments identically:
+
+```text
+/chorus ask <question>      ≡  /chorus-ask <question>
+/chorus agent <task>        ≡  /chorus-agent <task>
+/chorus optimize <prompt>   ≡  /chorus-optimize <prompt>
+/chorus config [action]     ≡  /chorus-config [action]
+```
+
+Use whichever you prefer; both feed the same prompt string to the voices. (Quoted or multi-word prompts are normalized the same way either way.)
 
 ## Modes
 

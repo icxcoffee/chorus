@@ -45,6 +45,39 @@ Preset: default | Voices: 2/2 | Duration: 46.6s | Cost: $0.008
 
 每个 voice 的完整输出持久化在 `~/.pi/agent/chorus/results/<jobId>/`，可用 `/chorus watch <jobId>` 实时查看。
 
+### Agent 示例：架构审查
+
+`/chorus agent` 是感知代码库的。每个子智能体都在仓库内运行，拥有完整工具权限（读文件、跑构建、追踪调用路径），随后主校验智能体（conductor）会对照真实代码交叉核验它们的结论。
+
+```text
+/chorus agent review the architecture of this project: where are the seams that could split into modules, and what logic is duplicated across direct and subagent mode?
+```
+
+```text
+# Chorus Result
+Preset: default | Agents: 2/2 | Duration: 14m | Cost: $0.016
+
+## Final Answer
+
+### Verified findings
+- **模式重复** - 两个智能体都指出 `runDirect` 和 `runSubagent` 各自重新实现了 voice 扇出、超时处理和成本汇总。已核实：`runtime/voice-runner.ts` 是共享的，但 direct/subagent 入口仍然重复了结果结构的拼装。
+- **硬编码并发** - 两个智能体都注意到 voice 并发数固定为 3，预设无法覆盖。在 `runtime/job-runner.ts` 中已核实。
+
+### Overstated / rejected
+- agent[1] 声称 `malformedLines` 是死代码 - 不正确，它在 `subagent.ts:141` 被抛出。
+- agent[0] 把 registry 为空的路径定为严重问题；默认的 `callPiModel` 路径会绕过它，实际严重度低。
+
+### Final Answer
+把 direct/subagent 的结果拼装收敛到一个 helper 之后，把并发数作为预设字段暴露出来。两条被否决的结论说明了校验步骤的价值：智能体可能很自信，但却是错的。
+
+## Run Summary
+- OK agent[0] model A | 11m | $0.009
+- OK agent[1] model B | 9m | $0.007
+- OK conductor (主校验) | 3m | $0.000
+```
+
+子智能体写入 `agent-N.md` + `agent-N-activity.md`（完整工具轨迹）；conductor 写入 `final-report.md`。全部持久化在 `~/.pi/agent/chorus/results/<jobId>/`。
+
 ## 安装
 
 以 Pi 包的形式从 npm 安装：
@@ -81,6 +114,17 @@ pi -e ./src/index.ts
 - `/chorus cancel <jobId>` 中止正在运行的任务。
 - `/chorus optimize [prompt...]` 仅用于手动改写 prompt。
 - `chorus_answer`，参数为 `{ "prompt": string, "presetName"?: string }`，供智能体作为工具调用。
+
+自由文本命令各有两种等价形式——子命令与直接别名——参数解析完全一致：
+
+```text
+/chorus ask <question>      ≡  /chorus-ask <question>
+/chorus agent <task>        ≡  /chorus-agent <task>
+/chorus optimize <prompt>   ≡  /chorus-optimize <prompt>
+/chorus config [action]     ≡  /chorus-config [action]
+```
+
+任选其一即可，两种形式喂给 voice 的 prompt 字符串相同。（带引号或多词的 prompt 两种形式都会做相同的归一化。）
 
 ## 模式
 
