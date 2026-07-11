@@ -5,7 +5,7 @@
 [![license](https://img.shields.io/npm/l/@icxcoffee/chorus?style=flat-square)](https://github.com/icxcoffee/chorus/blob/main/LICENSE)
 [![GitHub release](https://img.shields.io/github/v/release/icxcoffee/chorus?style=flat-square)](https://github.com/icxcoffee/chorus/releases/latest)
 
-**English** | [中文](README.zh-CN.md)
+[English](README.md) | **中文**
 
 Chorus 是一个 Pi 扩展，它把同一个 prompt 并行发送给多个 LLM "voice"（声音），再由一个独立的 conductor（指挥）模型把成功的响应综合成最终答案。
 
