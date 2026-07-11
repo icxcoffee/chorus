@@ -5,6 +5,27 @@ All notable changes to Chorus are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1] - 2026-07-11
+
+### Security
+
+- Harden `assertSafeEndpoint()` to block IPv4-mapped IPv6 forms of cloud-metadata IPs (e.g. `https://[::ffff:169.254.169.254]/`) that previously bypassed the link-local/metadata guard.
+- Block DNS-based cloud metadata service hostnames (`metadata.google.internal`, `metadata`, `metadata.aws.internal`) in direct mode.
+- Redact credentials in the `chorus history append failed` error path before printing to stderr.
+- Owner-only permissions (`0o700`/`0o600`) now documented and enforced for `~/.pi/agent/chorus/`.
+- History retention capped at 1000 runs with `/chorus history prune [N]` manual control.
+
+### Fixed
+
+- Replace tab indentation with spaces in `src/chorus.ts`, `src/role-prompts.ts`, and two test files so `npm run lint` passes and CI is green.
+- Disable source maps / declaration maps in the build config so `dist/` ships without `.map` files and the CI map check succeeds.
+- `npm audit` step in CI no longer silently skipped (`continue-on-error` removed).
+- `npm pack` tarball relies on the `files` allowlist; redundant `.npmignore` removed.
+- README verification section now references public commands instead of gitignored `.ai/verification/` scripts.
+- Add `publishConfig.access: public` so scoped package publishes stay public.
+
+[0.1.1]: https://github.com/icxcoffee/chorus/releases/tag/v0.1.1
+
 ## [0.1.0] - 2026-07-10
 
 ### Added

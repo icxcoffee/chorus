@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  verify:
+    name: Lint, typecheck, test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.19.0"
+          cache: "npm"
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
+
+  build:
+    name: Build and pack
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: verify
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.19.0"
+          cache: "npm"
+      - run: npm ci
+      - run: npm run build
+      - name: Verify dist contains no source maps
+        run: |
+          if find dist -name '*.map' -print -quit | grep -q .; then
+            echo "::error::dist must not ship source maps"
+            exit 1
+          fi
+      - name: Pack and inspect tarball contents
+        run: |
+          npm pack --dry-run
+          tarball=$(npm pack | tail -n 1)
+          if tar -tf "$tarball" | grep -qE '^package/src/'; then
+            echo "::error::src/ must not be in the npm tarball"
+            exit 1
+          fi
+          rm -f "$tarball"

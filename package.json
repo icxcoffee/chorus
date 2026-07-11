@@ -1,6 +1,6 @@
 {
   "name": "@icxcoffee/chorus",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Pi extension that fans a prompt out to multiple LLM voices in parallel, then asks a distinct conductor model to synthesize the successful responses.",
   "private": false,
   "type": "module",
@@ -19,7 +19,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
     "test:unit": "vitest run tests/unit",
-    "prepublishOnly": "npm run lint && npm run typecheck && npm run test && npm run build",
+    "prepublishOnly": "npm run lint && npm run typecheck && npm run test && npm run build && find dist -name '*.map' -delete && find dist -name '*.tsbuildinfo' -delete && npm pack --dry-run",
     "verify": "npm run lint && npm run typecheck && npm run test"
   },
   "pi": {
@@ -37,21 +37,27 @@
   ],
   "license": "MIT",
   "author": {
-    "name": "icxcoffee"
+    "name": "icxcoffee",
+    "url": "https://github.com/icxcoffee/chorus"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/icxcoffee/chorus.git"
+    "url": "git+https://github.com/icxcoffee/chorus.git",
+    "directory": "."
   },
   "bugs": {
     "url": "https://github.com/icxcoffee/chorus/issues"
   },
   "homepage": "https://github.com/icxcoffee/chorus#readme",
+  "sideEffects": false,
+  "publishConfig": {
+    "access": "public"
+  },
   "engines": {
     "node": ">=22.19.0"
   },
   "peerDependencies": {
-    "@earendil-works/pi-ai": "*"
+    "@earendil-works/pi-ai": ">=0.80.6 <1.0.0"
   },
   "devDependencies": {
     "@earendil-works/pi-ai": "^0.80.6",

@@ -77,11 +77,17 @@ Files are created with owner-only permissions where the platform supports it. v1
 
 ## Privacy
 
-Prompts and model outputs may contain private codebase context. Do not commit files from `~/.pi/agent/chorus/`. Error messages redact bearer tokens from provider errors before rendering.
+Chorus persists the **full content of every prompt, voice response, conductor synthesis, activity log, and error message** under `~/.pi/agent/chorus/` (mode 0o600). This directory may contain private codebase context, secrets echoed in provider stack traces, or other sensitive content. Treat it as you would `.env` files: do **not** commit it, do **not** sync it to cloud backup without encryption, and consider excluding it from shell history and editor session restore.
+
+Error messages redact common credential shapes (Bearer tokens, `sk-...` API keys, `Authorization` / `x-api-key` / `proxy-authorization` / `set-cookie` headers, `key=value` query parameters including `api_key`/`token`, JSON secret fields, and URL `userinfo:password@` credentials) before they enter history. This is best-effort and may not cover every provider error format.
+
+History is retained up to the most recent **1000 runs** by default; older runs are pruned automatically when new ones are appended. Run `/chorus history prune [N]` to manually prune to the last `N` entries. The directory is created with owner-only permissions (`0o700` for directories, `0o600` for files).
 
 ## Verification
 
 ```bash
-bash .ai/verification/fast.sh
-bash .ai/verification/full.sh
+npm run lint
+npm run typecheck
+npm test
+npm run build
 ```
