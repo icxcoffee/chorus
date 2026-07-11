@@ -38,8 +38,8 @@ Preset: default | Voices: 2/2 | Duration: 46.6s | Cost: $0.008
 作为运行在 pi 内部的 AI 视角，双方对 pi 的评价整体高度赞赏且务实。pi 的核心优势在于原生的代码理解能力与工具化设计——它没有简单地把 IDE 按钮暴露给 AI，而是提供了基于 `ast-grep`、LSP、`tree-sitter` 的工具原语（如 `module_report`、`read_symbol`），配合严格的 read-before-edit 守卫。仍需打磨的是子代理上下文传递，以及安全默认值与效率之间的平衡。
 
 ## Run Summary
-- OK voice[0] minimax-cn/MiniMax-M3 | 17.7s | $0.008
-- OK voice[1] custom-ark-cn-beijing-volces-com/deepseek-v4-flash | 18.2s | $0.000
+- OK voice[0] model A | 17.7s | $0.008
+- OK voice[1] model B | 18.2s | $0.000
 - OK conductor | $0.000
 ```
 

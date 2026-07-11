@@ -38,8 +38,8 @@ Preset: default | Voices: 2/2 | Duration: 46.6s | Cost: $0.008
 Both voices rate pi highly and pragmatically. Its core strength is native code understanding and a tool-oriented design: rather than exposing IDE buttons, it offers AI-native primitives (AST search, module outlines, subagent orchestration) plus a strict read-before-edit guard. The remaining rough edges are subagent context inheritance and the balance between safety defaults and friction.
 
 ## Run Summary
-- OK voice[0] minimax-cn/MiniMax-M3 | 17.7s | $0.008
-- OK voice[1] custom-ark-cn-beijing-volces-com/deepseek-v4-flash | 18.2s | $0.000
+- OK voice[0] model A | 17.7s | $0.008
+- OK voice[1] model B | 18.2s | $0.000
 - OK conductor | $0.000
 ```
 
