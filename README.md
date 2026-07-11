@@ -153,7 +153,25 @@ Use whichever you prefer; both feed the same prompt string to the voices. (Quote
 
 Direct mode calls provider APIs through adapters and computes cost from provider usage and model pricing. Subagent mode spawns `pi --mode json -p --no-session --model provider/modelId` for codebase-aware voice runs and parses NDJSON usage/cost events.
 
-By default, child agents are session-isolated. Use `/chorus config history on` to let child agents inherit the current Pi session history, or `/chorus config history off` to restore isolation. The `/chorus agent` conductor/main verification agent stays isolated and receives the child-agent evidence file instead of the parent session history.
+### Session history sharing
+
+By default, child agents spawned in subagent mode are **session-isolated** — they only see the Chorus task you submitted, not the surrounding Pi chat. This keeps your scratchpad, side comments, and unrelated conversation out of the model context. The setting is per-preset (stored as `includeSessionHistory` in `~/.pi/agent/chorus/config.json`).
+
+Toggle the default with:
+
+```text
+/chorus config history on    # child agents see this chat
+/chorus config history off   # child agents only see the task
+```
+
+What honors the flag, and what doesn't:
+
+- **Subagent-mode voices** (worker agents) follow the preset. When `on`, the child `pi` process is spawned without `--no-session`, so it inherits the parent Pi session.
+- **Direct-mode voices** are unaffected — they call provider APIs directly and never see session history regardless of this flag.
+- **`/chorus agent`'s main verification conductor** is always isolated, even when `history on`. It receives only the child-agent evidence file as its context, so it can verify claims against the agents' actual outputs without being biased by the user's chat.
+- **The `chorus_answer` tool** (used by other agents) also respects the preset, so a tool caller that picks `presetName: foo` inherits foo's history policy.
+
+Trade-off: `history on` makes the agent understand context cues like "as I mentioned above, …" but widens the prompt and may leak earlier conversation into unrelated tasks. Leave it `off` unless the task explicitly needs the surrounding chat.
 
 Use config commands to switch mode and timeouts:
 

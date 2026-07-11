@@ -153,7 +153,25 @@ pi -e ./src/index.ts
 
 Direct（直连）模式通过适配器调用各 provider 的 API，并根据 provider 返回的用量和模型定价计算成本。Subagent（子智能体）模式通过派生 `pi --mode json -p --no-session --model provider/modelId` 来进行感知代码库的 voice 运行，并解析 NDJSON 格式的用量/成本事件。
 
-默认情况下，子智能体会话隔离。使用 `/chorus config history on` 可让子智能体继承当前 Pi 会话的历史；使用 `/chorus config history off` 恢复隔离。`/chorus agent` 的 conductor / 主校验智能体始终隔离，它接收的是子智能体的证据文件，而非父会话历史。
+### 会话历史共享
+
+默认情况下，subagent 模式下派生的子智能体是**会话隔离的**——它们只能看到你提交的 Chorus 任务本身，看不到周围 Pi 对话中的内容。这样你的草稿、旁白和无关话题都不会进模型上下文。该设置为预设级，存储在 `~/.pi/agent/chorus/config.json` 的 `includeSessionHistory` 字段中。
+
+通过以下命令切换：
+
+```text
+/chorus config history on    # 子智能体可见当前会话
+/chorus config history off   # 子智能体只看到任务本身
+```
+
+哪些组件遵循这个开关、哪些不：
+
+- **subagent 模式的 voice**（工作子智能体）遵循预设。`on` 时，衍生的 `pi` 进程不会带 `--no-session`，会继承父 Pi 会话。
+- **direct 模式的 voice** 不受影响——它们直接调用 provider API，永远拿不到会话历史。
+- **`/chorus agent` 的主校验 conductor** 始终隔离，即便 `history on` 也一样。它只接收子智能体的证据文件作为上下文，从而能在不被用户对话干扰的前提下核验 agent 的实际输出。
+- **`chorus_answer` 工具**（被其他 agent 调用）也遵循预设——调用方选 `presetName: foo` 时会继承 foo 的会话策略。
+
+权衡：`history on` 让智能体能理解上下文线索（比如"我上面提到过……"），但会撑大 prompt 并可能让不相干的任务泄露前面的对话。除非任务明确依赖上下文对话，否则保持 `off`。
 
 使用配置命令切换模式和超时：
 
