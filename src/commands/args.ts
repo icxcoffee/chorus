@@ -36,6 +36,17 @@ export function splitCommandArgs(input: string): string[] {
   return args;
 }
 
+/**
+ * Normalize a free-text arg string the same way the `/chorus <sub>` router
+ * path does: tokenize with shell-style quote/escape handling, then rejoin with
+ * single spaces. This keeps the direct aliases (`/chorus-ask`, `/chorus-agent`,
+ * `/chorus-optimize`) byte-for-byte consistent with their `/chorus ask` /
+ * `/chorus agent` / `/chorus optimize` counterparts.
+ */
+export function joinArgs(input: string): string {
+  return splitCommandArgs(input).join(" ");
+}
+
 export function parseDurationMs(value: string | undefined): number | undefined | null {
   if (!value) return null;
   if (value === "default") return undefined;

@@ -2,6 +2,7 @@ import type { PiLikeContext } from "./pi-context.js";
 import { ChorusJobStore } from "./jobs.js";
 import { handleAgent } from "./commands/agent.js";
 import { handleAsk } from "./commands/ask.js";
+import { joinArgs } from "./commands/args.js";
 import { handleConfig } from "./commands/config.js";
 import { handleChorusCommand } from "./commands/router.js";
 import { handleOptimize } from "./commands/optimize.js";
@@ -23,15 +24,15 @@ export async function activate(ctx: PiLikeContext): Promise<void> {
   });
   registerCommand(ctx, "chorus-ask", {
     description: "Ask Chorus with the active preset",
-    handler: async (args, commandCtx) => handleAsk(withActivationActions(commandCtx, activationCtx), args.trim())
+    handler: async (args, commandCtx) => handleAsk(withActivationActions(commandCtx, activationCtx), joinArgs(args))
   });
   registerCommand(ctx, "chorus-agent", {
     description: "Run a task through multiple Chorus agents and synthesize the result",
-    handler: async (args, commandCtx) => handleAgent(withActivationActions(commandCtx, activationCtx), args.trim())
+    handler: async (args, commandCtx) => handleAgent(withActivationActions(commandCtx, activationCtx), joinArgs(args))
   });
   registerCommand(ctx, "chorus-optimize", {
     description: "Optimize a prompt without asking",
-    handler: async (args, commandCtx) => handleOptimize(withActivationActions(commandCtx, activationCtx), args.trim())
+    handler: async (args, commandCtx) => handleOptimize(withActivationActions(commandCtx, activationCtx), joinArgs(args))
   });
   registerTool(ctx, {
     name: "chorus_answer",
