@@ -262,9 +262,7 @@ export async function runChorus(args: RunChorusArgs): Promise<ChorusResult> {
     void appendHistory(result).catch((error) => {
         console.error(
             "chorus history append failed:",
-            redactSensitive(
-                error instanceof Error ? error.message : String(error),
-            ),
+            redactSensitive(error instanceof Error ? error.message : String(error)),
         );
     });
     return result;

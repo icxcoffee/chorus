@@ -2,7 +2,9 @@
 
 ## Reporting a vulnerability
 
-Please report security issues privately by emailing **[security@icxcoffee.dev](mailto:security@icxcoffee.dev)** (or via the GitHub repository's *Report a vulnerability* button under the Security tab). Do **not** open a public GitHub issue for suspected vulnerabilities.
+Please report security issues privately via the GitHub repository's **Report a vulnerability** button (*Security* tab → *Report a vulnerability*). This opens a private advisory visible only to repository maintainers. Do **not** open a public GitHub issue for suspected vulnerabilities.
+
+(Maintainers: enable this under repo *Settings* → *Code security and analysis* → *Private vulnerability reporting*.)
 
 We aim to:
 
@@ -31,7 +33,7 @@ Security-sensitive surface includes:
 | Threat | Mitigation |
 | --- | --- |
 | Bearer / API-key leakage via provider error bodies or stack traces | `redactSensitive()` is applied to all stderr and HTTP error bodies before they enter `VoiceResult.errorMessage`, `history.jsonl`, and `jobs.json`. |
-| SSRF / endpoint abuse in direct mode | `assertSafeEndpoint()` rejects non-https endpoints (except localhost) and link-local / cloud-metadata IPs before any credentials are attached. |
+| SSRF / endpoint abuse in direct mode | `assertSafeEndpoint()` rejects non-https endpoints (except localhost) and link-local / cloud-metadata IPs — including IPv4-mapped IPv6 wrappers (`::ffff:169.254.169.254`) and DNS metadata hostnames (`metadata.google.internal`) — before any credentials are attached. |
 | `pi` binary hijacking via `$PATH` in untrusted cwd | `resolvePiBinary()` resolves `pi` to an absolute path on `$PATH`; `resolveSubagentCwd()` refuses world-writable cwd (override: `CHORUS_ALLOW_UNSAFE_CWD=1`). |
 | Process group orphaning on Windows | `terminateSubagentProcess()` uses `taskkill /T /F` on `win32` instead of `process.kill(-pid)`. |
 | Prompt-injection via voice outputs in synthesis | Conductor system prompt explicitly treats voice blocks as untrusted data and instructs the model to ignore embedded directives. |

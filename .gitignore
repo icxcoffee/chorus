@@ -5,3 +5,5 @@ dist/
 .DS_Store
 .idea/
 *.iml
+# local-only release helper, never committed
+scripts/publish.sh
