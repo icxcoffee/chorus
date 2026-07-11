@@ -7,7 +7,7 @@
 
 [English](README.md) | **中文**
 
-Chorus 是一个 Pi 扩展，它把同一个 prompt 并行发送给多个 LLM "voice"（声音），再由一个独立的 conductor（指挥）模型把成功的响应综合成最终答案。
+Chorus 是一个 Pi 扩展，它把同一个 prompt 并行发送给多个不同的 LLM "voice"（声音）——比如 Claude、GPT、GLM、DeepSeek，或者你在 Pi 模型注册表中能配置的任何 provider——再由一个独立的 conductor（指挥）模型把成功的响应综合成最终答案。
 
 ## 示例
 

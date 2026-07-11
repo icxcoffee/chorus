@@ -7,7 +7,7 @@
 
 **English** | [中文](README.zh-CN.md)
 
-Chorus is a Pi extension that sends one prompt to multiple LLM voices in parallel, then asks a distinct conductor model to synthesize the successful responses.
+Chorus is a Pi extension that sends one prompt to multiple LLM voices in parallel — Claude, GPT, GLM, DeepSeek, or any provider your Pi registry knows about — then asks a distinct conductor model to synthesize the successful responses.
 
 ## Example
 
