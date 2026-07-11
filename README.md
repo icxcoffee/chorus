@@ -5,6 +5,8 @@
 [![license](https://img.shields.io/npm/l/@icxcoffee/chorus?style=flat-square)](https://github.com/icxcoffee/chorus/blob/main/LICENSE)
 [![GitHub release](https://img.shields.io/github/v/release/icxcoffee/chorus?style=flat-square)](https://github.com/icxcoffee/chorus/releases/latest)
 
+**English** | [中文](README.zh-CN.md)
+
 Chorus is a Pi extension that sends one prompt to multiple LLM voices in parallel, then asks a distinct conductor model to synthesize the successful responses.
 
 ## Installation
