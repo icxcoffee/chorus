@@ -1,6 +1,6 @@
 {
   "name": "@icxcoffee/chorus",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Programmable AI Review Engine that organizes expert roles into evidence-based review decisions.",
   "private": false,
   "type": "module",
