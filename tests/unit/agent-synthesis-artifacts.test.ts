@@ -64,7 +64,7 @@ describe("agent synthesis and artifacts", () => {
     const dir = await mkdtemp(join(tmpdir(), "chorus-artifacts-"));
     const history: ChorusResult[] = [];
     const result = await runChorus({
-      runConfig: { presetName: "default", voices: preset.voices, conductor: preset.conductor, mode: "subagent", strategy: "A" },
+      runConfig: { presetName: "default", voices: preset.voices, conductor: preset.conductor, mode: "subagent", strategy: "parallel" },
       prompt: "audit",
       registry,
       signal: new AbortController().signal,
@@ -122,6 +122,24 @@ describe("agent synthesis and artifacts", () => {
 
     expect(result.synthesis).toBe("verified final");
     expect(await readFile(join(dir, "main-agent-input.md"), "utf8")).toContain("answer 0");
+  });
+
+  it("rejects an artifact directory that is accessible to group or other users", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "chorus-insecure-artifacts-"));
+    const { chmod } = await import("node:fs/promises");
+    await chmod(dir, 0o755);
+    await expect(synthesizeWithMainAgent({
+      conductor: preset.conductor,
+      prompt: "audit",
+      voices: [voiceResult(0), voiceResult(1)],
+      totalVoices: 2,
+      registry,
+      signal: new AbortController().signal,
+      artifactDir: dir,
+      runSubagentVoiceImpl: async () => {
+        throw new Error("should not execute");
+      },
+    })).rejects.toThrow("private directory");
   });
 
   it("writes voice-labeled artifacts when requested", async () => {

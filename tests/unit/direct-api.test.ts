@@ -34,6 +34,20 @@ describe("direct api", () => {
         ];
         const body = parseRequestBody(init.body);
         expect(body.messages[0]?.content).toBe("s");
+        expect(init.redirect).toBe("error");
+    });
+
+    it("rejects automatic redirects in the raw direct fetch path", async () => {
+        const fetchImpl = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+            expect(init?.redirect).toBe("error");
+            throw new TypeError("fetch failed: redirect mode is set to error");
+        });
+        const result = await runDirectVoice({
+            voice: preset.voices[0]!, prompt: "p", registry, timeoutMs: 1000,
+            signal: new AbortController().signal, fetchImpl,
+        });
+        expect(result).toEqual(expect.objectContaining({ status: "error" }));
+        expect(fetchImpl).toHaveBeenCalledTimes(1);
     });
 
     it("returns null cost for unknown pricing", async () => {
@@ -105,6 +119,28 @@ describe("direct api", () => {
         expect(result.errorMessage).toBe("timed out after 1ms");
         expect(result.usage).toBeUndefined();
         expect(result.costUsd).toBeNull();
+    });
+
+    it("counts retry backoff against the voice timeout", async () => {
+        const fetchImpl = vi.fn(async () => new Response(
+            JSON.stringify({ error: { message: "temporarily unavailable" } }),
+            { status: 503 },
+        ));
+        const sleep = vi.fn(async (_delayMs: number, signal: AbortSignal) => await new Promise<void>((_resolve, reject) => {
+            signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+        }));
+        const result = await runDirectVoice({
+            voice: preset.voices[0]!,
+            prompt: "p",
+            registry,
+            timeoutMs: 10,
+            signal: new AbortController().signal,
+            fetchImpl,
+            retryPolicy: { maxAttempts: 3, sleep },
+        });
+        expect(result).toEqual(expect.objectContaining({ status: "error", errorMessage: "timed out after 10ms" }));
+        expect(fetchImpl).toHaveBeenCalledTimes(1);
+        expect(sleep).toHaveBeenCalledTimes(1);
     });
 
     it("handles parent abort as aborted", async () => {

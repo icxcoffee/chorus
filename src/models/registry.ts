@@ -5,12 +5,16 @@ export interface RegistryContext {
   modelRegistry?: RegistryLike;
   model?: unknown;
   sessionManager?: { scopedModels?: Array<{ model: unknown }> };
+  ui?: { notify?: (content: string, level?: "info" | "warning" | "error") => void };
 }
 
 export async function registryModels(ctx: RegistryContext): Promise<ModelInfo[]> {
   const scoped = ctx.sessionManager?.scopedModels?.map((entry) => entry.model).filter(Boolean);
   const registry = scoped && scoped.length > 0 ? await getRegistryModels(scoped as ModelInfo[]) : await getRegistryModels(ctx.modelRegistry);
   const authFiltered = filterConfiguredModels(ctx, registry);
+  if (ctx.modelRegistry?.hasConfiguredAuth && registry.length > 0 && authFiltered.length === 0) {
+    ctx.ui?.notify?.("Chorus found no models with configured authentication; showing the full model list for configuration and local/no-auth providers.", "warning");
+  }
   return sortCurrentModelFirst(ctx, focusChorusModels(authFiltered.length > 0 ? authFiltered : registry));
 }
 

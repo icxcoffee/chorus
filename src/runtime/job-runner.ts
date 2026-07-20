@@ -36,6 +36,7 @@ export interface ChorusCommandJobOptions {
 }
 
 export function runChorusCommandJob(ctx: PiLikeContext, options: ChorusCommandJobOptions): void {
+  const jobs = getJobStore(ctx);
   const unbindHostCancel = bindJobToHostSignal(options.job, ctx.signal);
   showRunStarted(ctx, {
     jobId: options.job.id,
@@ -54,7 +55,7 @@ export function runChorusCommandJob(ctx: PiLikeContext, options: ChorusCommandJo
     try {
       const response = await options.run({
         signal: options.job.abortController.signal,
-        onProgress: (updates) => getJobStore(ctx).updateProgress(options.job.id, updates),
+        onProgress: (updates) => jobs.updateProgress(options.job.id, updates),
         onStatus: (message) => {
           setChorusStatus(ctx, message);
           const match = options.statusPattern.exec(message);
@@ -63,15 +64,16 @@ export function runChorusCommandJob(ctx: PiLikeContext, options: ChorusCommandJo
         }
       });
       const status = options.job.abortController.signal.aborted ? "aborted" : "success";
-      getJobStore(ctx).finish(options.job.id, response.result, response.text, status);
+      jobs.finish(options.job.id, response.result, response.text, status);
       setChorusStatus(ctx, `${status === "aborted" ? "aborted" : "done"}: ${response.result.successfulVoices}/${response.result.totalVoices} ${options.actorPlural}`);
       showPersistentResult(ctx, response.text, options.details(response));
     } catch (error) {
-      getJobStore(ctx).fail(options.job.id, error);
+      jobs.fail(options.job.id, error);
       const message = error instanceof Error ? error.message : String(error);
       setChorusStatus(ctx, options.failedStatus);
       notify(ctx, `${options.failedMessagePrefix}: ${message}`, "error");
     } finally {
+      await jobs.flush().catch(() => undefined);
       unbindHostCancel();
       ctx.ui?.setWorkingMessage?.();
       setChorusWidget(ctx, undefined);

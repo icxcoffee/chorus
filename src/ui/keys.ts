@@ -3,6 +3,10 @@ export type UiKey =
   | "down"
   | "left"
   | "right"
+  | "home"
+  | "end"
+  | "pageup"
+  | "pagedown"
   | "tab"
   | "enter"
   | "escape"
@@ -66,6 +70,19 @@ export function parseUiKey(input: unknown): UiKeyEvent {
     case "right":
     case "arrowright":
       return { key: "right" };
+    case "home":
+      return { key: "home" };
+    case "end":
+      return { key: "end" };
+    case "pageup":
+    case "page up":
+    case "pgup":
+      return { key: "pageup" };
+    case "pagedown":
+    case "page down":
+    case "pgdown":
+    case "pgdn":
+      return { key: "pagedown" };
     case "tab":
       return { key: "tab" };
     case "return":
@@ -105,7 +122,16 @@ function parseTerminalSequence(value: string): UiKeyEvent | null {
     if ((codepoint === 13 || codepoint === 57414) && modifier === 0) return { key: "enter" };
     if (codepoint === 32 && modifier === 0) return { key: "space", text: " " };
     if (codepoint === 127 && modifier === 0) return { key: "backspace" };
+    if (codepoint === 57421 && modifier === 0) return { key: "pageup" };
+    if (codepoint === 57422 && modifier === 0) return { key: "pagedown" };
+    if (codepoint === 57423 && modifier === 0) return { key: "home" };
+    if (codepoint === 57424 && modifier === 0) return { key: "end" };
   }
+
+  if (["\u001b[H", "\u001bOH", "\u001b[1~", "\u001b[7~"].includes(value)) return { key: "home" };
+  if (["\u001b[F", "\u001bOF", "\u001b[4~", "\u001b[8~"].includes(value)) return { key: "end" };
+  if (["\u001b[5~", "\u001b[[5~"].includes(value)) return { key: "pageup" };
+  if (["\u001b[6~", "\u001b[[6~"].includes(value)) return { key: "pagedown" };
 
   const modifyOtherKeys = /^\u001b\[27;(\d+);(\d+)~$/.exec(value);
   if (modifyOtherKeys) {

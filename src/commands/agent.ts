@@ -1,55 +1,14 @@
 import type { PiLikeContext } from "../pi-context.js";
 import { resultDirForJob } from "../artifacts.js";
 import { runAgentUi } from "../ui/agent.js";
-import { composePrompt } from "../ui/prompt.js";
-import { registryModels } from "../models/registry.js";
-import { loadOrBootstrap } from "../store/config.js";
-import { getJobStore } from "../jobs/store.js";
 import { runChorusCommandJob } from "../runtime/job-runner.js";
-import { notify, showPersistentOptimization } from "../runtime/pi-ui.js";
 import { handleConfig } from "./config.js";
+import { prepareRunCommand } from "./run.js";
 
 export async function handleAgent(ctx: PiLikeContext, taskArg: string): Promise<void> {
-  const jobs = getJobStore(ctx);
-  await jobs.initialize(ctx.storePaths ?? {});
-  const registry = await registryModels(ctx);
-  let config = await loadOrBootstrap(ctx, registry);
-  let active = config.presets.find((preset) => preset.name === config.activePresetName) ?? config.presets[0];
-  let configuredFromComposer = false;
-  const composed = taskArg
-    ? { original: taskArg, prompt: taskArg }
-    : await composePrompt({
-        ui: ctx.ui ?? {},
-        title: "Chorus Agent Task",
-        placeholder: "Agent task",
-        registry,
-        signal: ctx.signal ?? new AbortController().signal,
-        ...(active?.conductor ? { model: active.conductor } : {}),
-        ...(ctx.modelRegistry ? { modelRegistry: ctx.modelRegistry } : {}),
-        onOptimized: (result) => showPersistentOptimization(ctx, result, "Chorus Agent Task"),
-        onConfigure: async () => {
-          configuredFromComposer = true;
-          await handleConfig(ctx, "");
-        }
-      });
-  const task = composed?.original ?? composed?.prompt ?? "";
-  if (!task) {
-    notify(ctx, "Usage: /chorus agent <task> or /chorus-agent <task>", "warning");
-    return;
-  }
-  if (configuredFromComposer) {
-    config = await loadOrBootstrap(ctx, registry);
-    active = config.presets.find((preset) => preset.name === config.activePresetName) ?? config.presets[0];
-  }
-  const job = jobs.create({
-    kind: "agent",
-    title: "Chorus Agent Task",
-    presetName: active?.name ?? config.activePresetName,
-    prompt: task,
-    ...(composed?.optimizedPrompt ? { optimizedPrompt: composed.optimizedPrompt } : {}),
-    command: `/chorus agent ${task}`,
-    voices: active?.voices ?? []
-  });
+  const prepared = await prepareRunCommand(ctx, taskArg, { kind: "agent", title: "Chorus Agent Task", placeholder: "Agent task", usage: "Usage: /chorus agent <task> or /chorus-agent <task>", commandName: "agent" }, async () => handleConfig(ctx, ""));
+  if (!prepared) return;
+  const { jobs, job, prompt: task, optimizedPrompt, config, active, registry } = prepared;
   const outputDir = resultDirForJob(job.id, ctx.storePaths);
   runChorusCommandJob(ctx, {
     job,
@@ -57,7 +16,7 @@ export async function handleAgent(ctx: PiLikeContext, taskArg: string): Promise<
     title: "Chorus Agent Task",
     presetName: active?.name ?? config.activePresetName,
     prompt: task,
-    ...(composed?.optimizedPrompt ? { optimizedPrompt: composed.optimizedPrompt } : {}),
+    ...(optimizedPrompt ? { optimizedPrompt } : {}),
     outputDir,
     initialStatus: "agents starting",
     widgetTitle: "Chorus agents running",
@@ -74,7 +33,7 @@ export async function handleAgent(ctx: PiLikeContext, taskArg: string): Promise<
         registry,
         ...(ctx.modelRegistry ? { modelRegistry: ctx.modelRegistry } : {}),
         signal,
-        ...(composed?.optimizedPrompt ? { optimizedPrompt: composed.optimizedPrompt } : {}),
+        ...(optimizedPrompt ? { optimizedPrompt } : {}),
         ...(ctx.storePaths ? { storePaths: ctx.storePaths } : {}),
         ...(ctx.cwd ? { cwd: ctx.cwd } : {}),
         ...(active?.voiceTimeoutMs ? { voiceTimeoutMs: active.voiceTimeoutMs } : {}),

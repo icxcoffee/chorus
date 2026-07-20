@@ -30,4 +30,20 @@ describe("synthesis", () => {
     });
     expect(result.synthesis).toBe("final");
   });
+
+  it("extracts validated structured quality without changing the Markdown answer", async () => {
+    const result = await synthesize({
+      conductor: preset.conductor, prompt: "p", voices: [voiceResult(0), voiceResult(1)], totalVoices: 2, registry,
+      signal: new AbortController().signal,
+      callModel: async () => ({ output: 'Markdown answer\n<chorus-structured>{"version":1,"answer":"normalized","claims":[{"text":"c","evidenceIds":["voice-0"]}],"disagreements":[],"confidence":0.9,"unresolvedQuestions":[]}</chorus-structured>', costUsd: 0 }),
+    });
+    expect(result.synthesis).toBe("Markdown answer");
+    expect(result.structured?.answer).toBe("normalized");
+    expect(result.qualityMetrics?.coverage).toBe(1);
+  });
+  it("requests and parses native structured output when the adapter supports it", async () => {
+    const result = await synthesize({ conductor: preset.conductor, prompt: "p", voices: [voiceResult(0), voiceResult(1)], totalVoices: 2, registry, signal: new AbortController().signal, callModel: async (args) => { expect(args.structuredOutput).toBe(true); return { output: JSON.stringify({ markdown: "native markdown", structured: { version: 1, answer: "a", claims: [], disagreements: [], confidence: null, unresolvedQuestions: [] } }), costUsd: 0 }; } });
+    expect(result.synthesis).toBe("native markdown");
+    expect(result.structured?.version).toBe(1);
+  });
 });

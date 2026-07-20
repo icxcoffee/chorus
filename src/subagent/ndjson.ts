@@ -3,20 +3,25 @@ import type { TokenUsage } from "../types.js";
 export interface ParsedSubagentOutput {
   output: string;
   activityLog?: string;
+  recoveryContext?: string;
   usage?: TokenUsage;
   costUsd: number | null;
   malformedLines: string[];
 }
 
 export interface SubagentParseState {
-  messageTexts: string[];
-  textDeltas: string[];
+  messageText: string;
+  currentText: string;
   activityBlocks: ActivityBlock[];
   blockIndexes: Map<string, number>;
   thinkingLengths: Map<number, number>;
   malformedLines: string[];
   usage?: TokenUsage;
   costUsd: number | null;
+  toolCallCount: number;
+  turnCount: number;
+  recoveryBlocks: string[];
+  recoveryDescriptors: Map<string, string>;
 }
 
 interface ActivityBlock {
@@ -31,11 +36,17 @@ export function parseSubagentNdjson(text: string): ParsedSubagentOutput {
     if (line.trim() === "") continue;
     applySubagentLine(state, line);
   }
+  return parsedOutputFromState(state);
+}
+
+export function parsedOutputFromState(state: SubagentParseState): ParsedSubagentOutput {
   const output = outputFromState(state).trim();
   const activityLog = activityLogFromState(state);
+  const recoveryContext = recoveryContextFromState(state);
   return {
     output,
     ...(activityLog ? { activityLog } : {}),
+    ...(recoveryContext ? { recoveryContext } : {}),
     costUsd: state.costUsd,
     malformedLines: state.malformedLines,
     ...(state.usage ? { usage: state.usage } : {})
@@ -44,13 +55,17 @@ export function parseSubagentNdjson(text: string): ParsedSubagentOutput {
 
 export function createParseState(): SubagentParseState {
   return {
-    messageTexts: [],
-    textDeltas: [],
+    messageText: "",
+    currentText: "",
     activityBlocks: [],
     blockIndexes: new Map(),
     thinkingLengths: new Map(),
     malformedLines: [],
-    costUsd: null
+    costUsd: null,
+    toolCallCount: 0,
+    turnCount: 0,
+    recoveryBlocks: [],
+    recoveryDescriptors: new Map()
   };
 }
 
@@ -66,17 +81,22 @@ export function applySubagentLine(state: SubagentParseState, line: string): void
   applyActivityEvent(state, event, type);
   if (type === "message_end" || type === "message") {
     const content = extractMessageText(event);
-    if (content) state.messageTexts.push(content);
+    if (content) {
+      state.messageText = content;
+      state.currentText = "";
+    }
   }
   if (type === "message_update") {
     const update = event.assistantMessageEvent as Record<string, unknown> | undefined;
     if (update) {
       const updateType = String(update.type ?? "");
-      if (updateType === "text_delta" && typeof update.delta === "string") {
-        state.textDeltas.push(update.delta);
+      if (updateType === "text_start") {
+        state.messageText = "";
+        state.currentText = "";
+      } else if (updateType === "text_delta" && typeof update.delta === "string") {
+        state.currentText += update.delta;
       } else if (updateType === "text_end" && typeof update.content === "string") {
-        state.textDeltas.length = 0;
-        state.textDeltas.push(update.content);
+        state.currentText = update.content;
       }
     }
   }
@@ -94,11 +114,12 @@ export function applySubagentLine(state: SubagentParseState, line: string): void
 }
 
 export function outputFromState(state: SubagentParseState): string {
-  return state.messageTexts.at(-1) ?? state.textDeltas.join("");
+  return state.messageText || state.currentText;
 }
 
 function applyActivityEvent(state: SubagentParseState, event: Record<string, unknown>, type: string): void {
   if (type === "turn_start") {
+    state.turnCount += 1;
     appendActivity(state, `turn:${String(event.turnIndex ?? state.activityBlocks.length)}:start`, "[turn]", `start ${String(event.turnIndex ?? "")}`.trim());
     return;
   }
@@ -107,7 +128,9 @@ function applyActivityEvent(state: SubagentParseState, event: Record<string, unk
     return;
   }
   if (type === "tool_execution_start") {
+    state.toolCallCount += 1;
     const name = String(event.toolName ?? "tool");
+    state.recoveryDescriptors.set(toolKey(event), toolDescriptor(name, event.args));
     appendActivity(state, `tool-exec:${String(event.toolCallId ?? state.activityBlocks.length)}:start`, "[tool start]", `${name} ${formatUnknown(event.args)}`.trim());
     return;
   }
@@ -120,10 +143,12 @@ function applyActivityEvent(state: SubagentParseState, event: Record<string, unk
     const name = String(event.toolName ?? "tool");
     const isError = event.isError === true ? " error" : "";
     appendActivity(state, `tool-exec:${String(event.toolCallId ?? state.activityBlocks.length)}:end`, "[tool done]", `${name}${isError} ${formatUnknown(event.result)}`.trim());
+    appendRecoveryBlock(state, state.recoveryDescriptors.get(toolKey(event)) ?? name, event.result);
     return;
   }
   if (type === "tool_call") {
     const name = String(event.toolName ?? "tool");
+    state.recoveryDescriptors.set(toolKey(event), toolDescriptor(name, event.input));
     appendActivity(state, `tool-call:${String(event.toolCallId ?? state.activityBlocks.length)}`, "[tool call]", `${name} ${formatUnknown(event.input)}`.trim());
     return;
   }
@@ -131,6 +156,7 @@ function applyActivityEvent(state: SubagentParseState, event: Record<string, unk
     const name = String(event.toolName ?? "tool");
     const isError = event.isError === true ? " error" : "";
     appendActivity(state, `tool-result:${String(event.toolCallId ?? state.activityBlocks.length)}`, "[tool result]", `${name}${isError} ${extractContentText(event.content) || formatUnknown(event.details)}`.trim());
+    appendRecoveryBlock(state, state.recoveryDescriptors.get(toolKey(event)) ?? name, event.content ?? event.details);
     return;
   }
   if (type !== "message_update") return;
@@ -198,6 +224,10 @@ export function activityLogFromState(state: SubagentParseState): string {
     .join("\n\n");
 }
 
+export function recoveryContextFromState(state: SubagentParseState): string {
+  return state.recoveryBlocks.join("\n\n");
+}
+
 function trimActivityBlocks(state: SubagentParseState): void {
   const maxBlocks = 120;
   if (state.activityBlocks.length <= maxBlocks) return;
@@ -247,14 +277,30 @@ function extractContentArrayText(content: unknown[]): string {
     .join("");
 }
 
-function formatUnknown(value: unknown): string {
+function formatUnknown(value: unknown, maximum = 1000): string {
   if (value == null) return "";
-  if (typeof value === "string") return limitText(value.replace(/\s+/g, " ").trim(), 600);
+  if (typeof value === "string") return limitText(value.replace(/\s+/g, " ").trim(), Math.min(600, maximum));
   try {
-    return limitText(JSON.stringify(value), 1000);
+    return limitText(JSON.stringify(value), maximum);
   } catch {
-    return limitText(String(value), 600);
+    return limitText(String(value), Math.min(600, maximum));
   }
+}
+
+function toolKey(event: Record<string, unknown>): string {
+  return String(event.toolCallId ?? event.id ?? "tool");
+}
+
+function toolDescriptor(name: string, args: unknown): string {
+  return `${name} ${formatUnknown(args)}`.trim();
+}
+
+function appendRecoveryBlock(state: SubagentParseState, descriptor: string, result: unknown): void {
+  const record = result && typeof result === "object" && !Array.isArray(result) ? result as Record<string, unknown> : undefined;
+  const text = extractContentText(record?.content ?? result) || formatUnknown(result, 6_000);
+  if (!text) return;
+  state.recoveryBlocks.push(`[tool ${descriptor}]\n${limitText(text, 6_000)}`);
+  while (state.recoveryBlocks.join("\n\n").length > 60_000 && state.recoveryBlocks.length > 1) state.recoveryBlocks.shift();
 }
 
 function limitText(value: string, maxLength: number): string {

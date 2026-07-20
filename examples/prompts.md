@@ -1,5 +1,44 @@
 # Chorus Prompt Examples
 
+## `/chorus review`
+
+```text
+/chorus review code-review --profile quick --base origin/main --head HEAD review security and API compatibility
+```
+
+```text
+/chorus review --file ./review.yaml
+```
+
+```yaml
+version: 1
+workflow: code-review
+profile: quick
+language: zh-CN
+objective:
+  - security
+  - api-compatibility
+constraints:
+  - preserve-public-api
+scope:
+  kind: diff
+  selection: staged
+committee:
+  - role: architect
+  - role: security
+  - role: maintainability
+  - role: devil
+  - role: integrator
+stages:
+  - independent-review
+  - cross-review
+  - devil
+  - integrate
+output:
+  - markdown
+  - json
+```
+
 ## `/chorus ask`
 
 ```text

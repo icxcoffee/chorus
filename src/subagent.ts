@@ -1,15 +1,16 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { statSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { delimiter, isAbsolute, join } from "node:path";
+import { join } from "node:path";
 import { spawn as nodeSpawn } from "node:child_process";
 import type { SpawnOptions } from "node:child_process";
 import type { EventEmitter } from "node:events";
 import type { Readable } from "node:stream";
+import { StringDecoder } from "node:string_decoder";
 import type {
     ChorusVoice,
     PartialVoiceProgress,
     VoiceResult,
+    SubagentPermissionProfile,
 } from "./types.js";
 import { ROLE_SYSTEM_PROMPTS } from "./role-prompts.js";
 import { modelRefToPiArg } from "./utils/models.js";
@@ -20,11 +21,24 @@ import {
     createParseState,
     outputFromState,
     parseSubagentNdjson,
+    parsedOutputFromState,
+    recoveryContextFromState,
 } from "./subagent/ndjson.js";
+import {
+    assertPermissionProfileAllowed,
+    buildChildEnvironment,
+    permissionProfileArgs,
+    resolvePiBinary,
+    resolveSubagentCwd,
+} from "./subagent/runtime.js";
+import { registerActiveSubagentProcess, terminateSubagentProcess } from "./subagent/processes.js";
+import { BoundedByteTail } from "./subagent/bounded-byte-tail.js";
 export {
     parseSubagentNdjson,
     type ParsedSubagentOutput,
 } from "./subagent/ndjson.js";
+
+const MAX_RETAINED_STDERR_BYTES = 256 * 1024;
 
 export type SpawnLike = (
     command: string,
@@ -51,6 +65,13 @@ export interface SubagentVoiceArgs {
     signal: AbortSignal;
     spawnImpl?: SpawnLike;
     onProgress?: (update: PartialVoiceProgress) => void;
+    permissionProfile?: SubagentPermissionProfile;
+    disableTools?: boolean;
+    timeoutMode?: "total" | "inactivity";
+    progressIntervalMs?: number;
+    maxToolCalls?: number;
+    maxTurns?: number;
+    retainRecoveryContext?: boolean;
 }
 
 /**
@@ -67,7 +88,18 @@ export async function runSubagentVoice(
     let child: SubagentChild | undefined;
     let timedOut = false;
     let aborted = false;
+    let retainedPartialOutput: string | undefined;
+    let retainedActivityLog: string | undefined;
+    let retainedRecoveryContext: string | undefined;
+    let retainedUsage: VoiceResult["usage"];
+    let retainedCostUsd: number | null = null;
+    let progressTimer: NodeJS.Timeout | undefined;
+    let unregisterChild: (() => void) | undefined;
+    let toolLimitExceeded = false;
+    let turnLimitExceeded = false;
+    const permissionProfile = args.permissionProfile ?? "read-only";
     try {
+        assertPermissionProfileAllowed(permissionProfile);
         tempDir = await mkdtemp(join(tmpdir(), "chorus-subagent-"));
         const promptFile = join(tempDir, "system-prompt.txt");
         const taskFile = join(tempDir, "task.md");
@@ -86,6 +118,7 @@ export async function runSubagentVoice(
             ((command, spawnArgs, options) =>
                 nodeSpawn(command, spawnArgs, options) as SubagentChild);
         const sessionArgs = args.includeSessionHistory ? [] : ["--no-session"];
+        const permissionArgs = permissionProfileArgs(permissionProfile, args.disableTools === true);
         const cwd = resolveSubagentCwd(args.cwd);
         child = spawnImpl(
             resolvePiBinary(),
@@ -94,6 +127,7 @@ export async function runSubagentVoice(
                 "json",
                 "-p",
                 ...sessionArgs,
+                ...permissionArgs,
                 "--model",
                 modelRefToPiArg(args.voice.model),
                 "--append-system-prompt",
@@ -101,16 +135,37 @@ export async function runSubagentVoice(
                 `@${taskFile}`,
                 "Follow the task in the attached file.",
             ],
-            { cwd, stdio: ["ignore", "pipe", "pipe"], detached: true },
+            { cwd, stdio: ["ignore", "pipe", "pipe"], detached: true, env: buildChildEnvironment(permissionProfile) },
         );
-        const stdoutChunks: Buffer[] = [];
-        const stderrChunks: Buffer[] = [];
+        unregisterChild = registerActiveSubagentProcess(child);
+        const stderrTail = new BoundedByteTail(MAX_RETAINED_STDERR_BYTES);
         const incrementalState = createParseState();
-        let stdoutRemainder = "";
+        const stdoutDecoder = new StringDecoder("utf8");
+        let stdoutSegments: string[] = [];
+        let lastProgressAt = 0;
+        let forceKillTimer: NodeJS.Timeout | undefined;
+        const terminate = () => {
+            terminateSubagentProcess(child, "SIGTERM");
+            forceKillTimer = setTimeout(
+                () => terminateSubagentProcess(child, "SIGKILL"),
+                5_000,
+            );
+        };
         const emitProgress = () => {
+            if (progressTimer) {
+                clearTimeout(progressTimer);
+                progressTimer = undefined;
+            }
+            lastProgressAt = Date.now();
             const partialOutput = outputFromState(incrementalState).trim();
             const activityLog = activityLogFromState(incrementalState);
             if (!partialOutput && !activityLog) return;
+            if (partialOutput) retainedPartialOutput = partialOutput;
+            if (activityLog) retainedActivityLog = activityLog;
+            const recoveryContext = recoveryContextFromState(incrementalState);
+            if (recoveryContext) retainedRecoveryContext = recoveryContext;
+            if (incrementalState.usage) retainedUsage = incrementalState.usage;
+            retainedCostUsd = incrementalState.costUsd;
             args.onProgress?.({
                 voiceIndex,
                 voice: args.voice,
@@ -122,34 +177,63 @@ export async function runSubagentVoice(
                 costUsd: incrementalState.costUsd,
             });
         };
-        child.stdout.on("data", (chunk: Buffer | string) => {
-            const buffer = Buffer.from(chunk);
-            stdoutChunks.push(buffer);
-            stdoutRemainder += buffer.toString("utf8");
-            const lines = stdoutRemainder.split(/\r?\n/);
-            stdoutRemainder = lines.pop() ?? "";
-            for (const line of lines) {
-                if (line.trim() === "") continue;
-                applySubagentLine(incrementalState, line);
+        const scheduleProgress = () => {
+            const intervalMs = Math.max(0, args.progressIntervalMs ?? 50);
+            const elapsed = Date.now() - lastProgressAt;
+            if (lastProgressAt === 0 || elapsed >= intervalMs) {
                 emitProgress();
+                return;
             }
-        });
-        child.stderr.on("data", (chunk: Buffer | string) =>
-            stderrChunks.push(Buffer.from(chunk)),
-        );
-
-        let forceKillTimer: NodeJS.Timeout | undefined;
-        const terminate = () => {
-            terminateSubagentProcess(child, "SIGTERM");
-            forceKillTimer = setTimeout(
-                () => terminateSubagentProcess(child, "SIGKILL"),
-                5_000,
-            );
+            if (!progressTimer) progressTimer = setTimeout(emitProgress, intervalMs - elapsed);
         };
-        const timeout = setTimeout(() => {
+        const applyDecodedChunk = (decoded: string) => {
+            const parts = decoded.split("\n");
+            if (parts.length === 1) {
+                if (decoded) stdoutSegments.push(decoded);
+                return;
+            }
+            let processed = false;
+            const first = `${stdoutSegments.join("")}${parts[0] ?? ""}`;
+            stdoutSegments = [];
+            for (const line of [first, ...parts.slice(1, -1)]) {
+                const normalized = line.endsWith("\r") ? line.slice(0, -1) : line;
+                if (normalized.trim() === "") continue;
+                applySubagentLine(incrementalState, normalized);
+                if (args.maxToolCalls !== undefined && incrementalState.toolCallCount > args.maxToolCalls && !toolLimitExceeded) {
+                    toolLimitExceeded = true;
+                    terminate();
+                }
+                if (args.maxTurns !== undefined && incrementalState.turnCount > args.maxTurns && !turnLimitExceeded) {
+                    turnLimitExceeded = true;
+                    terminate();
+                }
+                processed = true;
+            }
+            const remainder = parts.at(-1) ?? "";
+            if (remainder) stdoutSegments.push(remainder);
+            if (processed) scheduleProgress();
+        };
+        child.stdout.on("data", (chunk: Buffer | string) => {
+            refreshTimeout();
+            const buffer = typeof chunk === "string" ? Buffer.from(chunk) : chunk;
+            applyDecodedChunk(stdoutDecoder.write(buffer));
+        });
+        child.stderr.on("data", (chunk: Buffer | string) => {
+            refreshTimeout();
+            stderrTail.append(chunk);
+        });
+
+        let timeout: NodeJS.Timeout | undefined;
+        const onTimeout = () => {
             timedOut = true;
             terminate();
-        }, args.timeoutMs);
+        };
+        function refreshTimeout(): void {
+            if (args.timeoutMode !== "inactivity" || timedOut || aborted) return;
+            if (timeout) clearTimeout(timeout);
+            timeout = setTimeout(onTimeout, args.timeoutMs);
+        }
+        timeout = setTimeout(onTimeout, args.timeoutMs);
         const onAbort = () => {
             aborted = true;
             terminate();
@@ -160,19 +244,33 @@ export async function runSubagentVoice(
             child?.on("error", reject);
             child?.on("close", (code: number | null) => resolve(code));
         }).finally(() => {
-            clearTimeout(timeout);
+            if (timeout) clearTimeout(timeout);
             if (forceKillTimer) clearTimeout(forceKillTimer);
             args.signal.removeEventListener("abort", onAbort);
         });
 
-        const stderr = redactSensitive(
-            Buffer.concat(stderrChunks).toString("utf8").trim(),
-        );
-        const parsed = parseSubagentNdjson(
-            Buffer.concat(stdoutChunks).toString("utf8"),
-        );
-        if (timedOut) throw new Error(`timed out after ${args.timeoutMs}ms`);
+        applyDecodedChunk(stdoutDecoder.end());
+        const finalLine = stdoutSegments.join("");
+        stdoutSegments = [];
+        if (finalLine.trim()) applySubagentLine(incrementalState, finalLine);
+        emitProgress();
+
+        const stderrText = redactSensitive(stderrTail.toBuffer().toString("utf8").trim());
+        const stderr = stderrTail.omittedBytes() > 0
+            ? `[stderr truncated: ${stderrTail.omittedBytes()} bytes omitted]\n${stderrText}`.trim()
+            : stderrText;
+        const parsed = parsedOutputFromState(incrementalState);
+        if (parsed.output) retainedPartialOutput = parsed.output;
+        if (parsed.activityLog) retainedActivityLog = parsed.activityLog;
+        if (parsed.recoveryContext) retainedRecoveryContext = parsed.recoveryContext;
+        if (parsed.usage) retainedUsage = parsed.usage;
+        retainedCostUsd = parsed.costUsd;
+        if (timedOut) throw new Error(args.timeoutMode === "inactivity"
+            ? `inactivity timeout after ${args.timeoutMs}ms without subagent output`
+            : `timed out after ${args.timeoutMs}ms`);
         if (aborted || args.signal.aborted) throw new AbortError();
+        if (toolLimitExceeded) throw new Error(`tool call limit exceeded (${args.maxToolCalls ?? 0} allowed)`);
+        if (turnLimitExceeded) throw new Error(`turn limit exceeded (${args.maxTurns ?? 0} allowed)`);
         if (exitCode !== 0)
             throw new Error(stderr || `pi exited with code ${String(exitCode)}`);
         if (parsed.malformedLines.length > 0)
@@ -186,9 +284,11 @@ export async function runSubagentVoice(
             status: "success",
             output: parsed.output,
             ...(parsed.activityLog ? { activityLog: parsed.activityLog } : {}),
+            ...(args.retainRecoveryContext && parsed.recoveryContext ? { recoveryContext: parsed.recoveryContext } : {}),
             durationMs: Date.now() - startedAt,
             costUsd: parsed.costUsd,
             startedAt,
+            permissionProfile,
             ...(parsed.usage ? { usage: parsed.usage } : {}),
         };
         args.onProgress?.({
@@ -207,8 +307,13 @@ export async function runSubagentVoice(
             voice: args.voice,
             status: error instanceof AbortError ? "aborted" : "error",
             durationMs: Date.now() - startedAt,
-            costUsd: null,
+            costUsd: retainedCostUsd,
             startedAt,
+            permissionProfile,
+            ...(retainedPartialOutput ? { partialOutput: retainedPartialOutput } : {}),
+            ...(retainedActivityLog ? { activityLog: retainedActivityLog } : {}),
+            ...(args.retainRecoveryContext && retainedRecoveryContext ? { recoveryContext: retainedRecoveryContext } : {}),
+            ...(retainedUsage ? { usage: retainedUsage } : {}),
             errorMessage: redactSensitive(message),
         };
         args.onProgress?.({
@@ -216,93 +321,18 @@ export async function runSubagentVoice(
             voice: args.voice,
             status: result.status,
             durationMs: result.durationMs,
-            costUsd: null,
+            costUsd: result.costUsd,
+            ...(result.partialOutput ? { partialOutput: result.partialOutput } : {}),
+            ...(result.activityLog ? { activityLog: result.activityLog } : {}),
+            ...(result.usage ? { usage: result.usage } : {}),
             ...(result.errorMessage ? { errorMessage: result.errorMessage } : {}),
         });
         return result;
     } finally {
+        if (progressTimer) clearTimeout(progressTimer);
+        unregisterChild?.();
         if (tempDir) await rm(tempDir, { recursive: true, force: true });
     }
-}
-
-function resolveSubagentCwd(requested?: string): string {
-    const cwd = requested ?? process.cwd();
-    if (process.env.CHORUS_ALLOW_UNSAFE_CWD === "1") return cwd;
-    try {
-        const mode = statSync(cwd).mode & 0o777;
-        if (mode & 0o002) {
-            throw new Error(
-                `chorus refuses to spawn subagents in a world-writable cwd (${cwd}); ` +
-                    "move to a private directory or set CHORUS_ALLOW_UNSAFE_CWD=1 to override",
-            );
-        }
-    } catch (error) {
-        if (error instanceof Error && error.message.startsWith("chorus refuses"))
-            throw error;
-        // If we cannot stat the cwd (ENOENT), let spawn surface the real error.
-    }
-    return cwd;
-}
-
-let cachedPiBinary: string | undefined;
-
-function resolvePiBinary(): string {
-    if (cachedPiBinary) return cachedPiBinary;
-    const override = process.env.CHORUS_PI_BIN;
-    if (override && isAbsolute(override)) {
-        cachedPiBinary = override;
-        return cachedPiBinary;
-    }
-    const path = process.env.PATH ?? "";
-    const ext =
-        process.platform === "win32" ? (process.env.PATHEXT ?? ".EXE") : "";
-    const dirs = path.split(delimiter).filter(Boolean);
-    for (const dir of dirs) {
-        const candidate = join(dir, "pi") + ext;
-        try {
-            if (statSync(candidate).isFile()) {
-                cachedPiBinary = candidate;
-                return cachedPiBinary;
-            }
-        } catch {
-            // continue searching PATH
-        }
-    }
-    // Last resort: rely on the shell/PATH resolution as before.
-    cachedPiBinary = "pi";
-    return cachedPiBinary;
-}
-
-function terminateSubagentProcess(
-    child: SubagentChild | undefined,
-    signal: NodeJS.Signals,
-): void {
-    if (!child) return;
-    if (process.platform === "win32") {
-        // On Windows process-group signaling is unavailable; use taskkill /T to take
-        // down the whole descendant tree so detached pi children do not go orphan.
-        if (typeof child.pid === "number") {
-            try {
-                nodeSpawn("taskkill", ["/PID", String(child.pid), "/T", "/F"], {
-                    stdio: "ignore",
-                });
-                return;
-            } catch {
-                // Fall through to the direct kill below.
-            }
-        }
-        child.kill(signal);
-        return;
-    }
-    if (typeof child.pid === "number") {
-        try {
-            process.kill(-child.pid, signal);
-            return;
-        } catch {
-            // Fall back to the direct child when process-group signaling is unavailable.
-        }
-    }
-    child.kill(signal);
 }
 
 class AbortError extends Error {

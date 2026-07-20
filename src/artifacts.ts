@@ -1,9 +1,10 @@
-import { access, mkdir, readdir, writeFile } from "node:fs/promises";
+import { access, mkdir, readdir } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import type { ChorusArtifact, ChorusResult, VoiceResult } from "./types.js";
 import { resolveStorePaths, type StorePaths } from "./store.js";
 import { fallbackAnswer } from "./utils/fallback.js";
 import { modelRefToPiArg } from "./utils/models.js";
+import { atomicPrivateWrite } from "./utils/private-file.js";
 
 export interface WriteRunArtifactsArgs {
   result: ChorusResult;
@@ -23,7 +24,7 @@ export async function writeRunArtifacts(args: WriteRunArtifactsArgs): Promise<Ch
   const artifacts: ChorusArtifact[] = [];
   const writeArtifact = async (label: string, fileName: string, content: string): Promise<string> => {
     const path = join(args.outputDir, fileName);
-    await writeFile(path, content.endsWith("\n") ? content : `${content}\n`, { mode: 0o600 });
+    await atomicPrivateWrite(path, content.endsWith("\n") ? content : `${content}\n`);
     artifacts.push({ label, path });
     return path;
   };
@@ -53,8 +54,22 @@ export async function writeRunArtifacts(args: WriteRunArtifactsArgs): Promise<Ch
     });
   }
 
+  for (const [roundIndex, round] of args.result.strategy?.rounds.entries() ?? []) {
+    for (const [voiceIndex, voice] of round.voices.entries()) {
+      await writeArtifact(
+        `round-${roundIndex}-${round.name}-${voiceIndex}`,
+        `round-${roundIndex}-${sanitizePathSegment(round.name)}-${voiceIndex}.md`,
+        renderVoice(voiceIndex, voice, round.name)
+      );
+    }
+  }
+
   if (args.result.conductorActivityLog) {
     await writeArtifact("main-agent-activity", "main-agent-activity.md", args.result.conductorActivityLog);
+  }
+  if (args.result.quality) {
+    await writeArtifact("conductor-raw", "conductor-raw.md", args.result.quality.raw);
+    await writeArtifact("quality", "quality.json", JSON.stringify({ structured: args.result.quality.structured, metrics: args.result.quality.metrics }, null, 2));
   }
   await writeArtifact("final-report", "final-report.md", args.result.synthesis ?? fallbackAnswer(args.result));
 

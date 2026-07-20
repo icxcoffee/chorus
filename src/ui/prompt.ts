@@ -32,6 +32,9 @@ export async function composePrompt(args: {
   fetchImpl?: typeof fetch;
   onOptimized?: (result: OptimizeResult) => void;
   onConfigure?: () => Promise<void>;
+  configureLabel?: string;
+  context?: string[] | (() => string[]);
+  allowEmpty?: boolean;
 }): Promise<ComposePromptResult | null> {
   let current = "";
   let original = "";
@@ -42,7 +45,10 @@ export async function composePrompt(args: {
       placeholder: args.placeholder,
       value: current,
       optimized: optimizedPrompt !== undefined,
-      canConfigure: Boolean(args.onConfigure)
+      canConfigure: Boolean(args.onConfigure),
+      allowEmpty: args.allowEmpty === true,
+      configureLabel: args.configureLabel ?? "Config",
+      context: typeof args.context === "function" ? args.context() : (args.context ?? [])
     });
     if (!picked) return null;
     current = picked.value.trim();
@@ -50,7 +56,10 @@ export async function composePrompt(args: {
       await args.onConfigure?.();
       continue;
     }
-    if (!current) continue;
+    if (!current) {
+      if (picked.action === "submit" && args.allowEmpty) return { original: "", prompt: "" };
+      continue;
+    }
     if (!original) original = current;
     if (picked.action === "submit") {
       const result: ComposePromptResult = { original, prompt: current };
@@ -81,11 +90,11 @@ export async function composePrompt(args: {
 
 async function promptComposer(
   ui: PromptComposerUiLike,
-  args: { title: string; placeholder: string; value: string; optimized: boolean; canConfigure: boolean }
+  args: { title: string; placeholder: string; value: string; optimized: boolean; canConfigure: boolean; allowEmpty: boolean; configureLabel: string; context: string[] }
 ): Promise<{ action: ComposerAction; value: string } | null> {
   if (!ui.custom) {
     const value = args.value || (await ui.input?.(args.placeholder)) || "";
-    return value ? { action: "submit", value } : null;
+    return value || args.allowEmpty ? { action: "submit", value } : null;
   }
   return runCustomComponent<{ action: ComposerAction; value: string } | null>(ui, ({ theme, keybindings, done, refresh }) => {
     let value = args.value;
@@ -93,7 +102,7 @@ async function promptComposer(
     let scroll = 0;
     const actions: Array<{ action: ComposerAction; label: string }> = [
       { action: "submit", label: "Submit" },
-      ...(args.canConfigure ? [{ action: "config" as const, label: "Config" }] : []),
+      ...(args.canConfigure ? [{ action: "config" as const, label: args.configureLabel }] : []),
       { action: "optimize", label: args.optimized ? "Optimize again" : "Optimize" },
       { action: "cancel", label: "Cancel" }
     ];
@@ -146,6 +155,7 @@ function renderComposer(args: {
   placeholder: string;
   value: string;
   optimized: boolean;
+  context: string[];
   actionIndex: number;
   actions: Array<{ action: ComposerAction; label: string }>;
   width: number;
@@ -171,6 +181,7 @@ function renderComposer(args: {
   const lines = [
     color("accent", "-".repeat(width)),
     ` ${color("accent", bold(args.title))} ${status}`,
+    ...args.context.map((line) => ` ${color("muted", line)}`),
     "",
     ...body.map((line) => ` ${line || " "}`),
     ...(wrapped.length > maxBody ? [` ${scroll + 1}-${Math.min(scroll + maxBody, wrapped.length)} of ${wrapped.length}`] : []),

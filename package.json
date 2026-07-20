@@ -1,11 +1,14 @@
 {
   "name": "@icxcoffee/chorus",
   "version": "0.1.3",
-  "description": "Pi extension that fans a prompt out to multiple LLM voices in parallel, then asks a distinct conductor model to synthesize the successful responses.",
+  "description": "Programmable AI Review Engine that organizes expert roles into evidence-based review decisions.",
   "private": false,
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "bin": {
+    "chorus-review-policy": "./dist/cli/review-policy.js"
+  },
   "files": [
     "dist",
     "examples",
@@ -15,11 +18,12 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "rm -rf dist && tsc -p tsconfig.build.json",
+    "build": "rm -rf dist && tsc -p tsconfig.build.json && chmod +x dist/cli/review-policy.js",
     "lint": "node scripts/lint.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
     "test:unit": "vitest run tests/unit",
+    "test:integration": "vitest run tests/integration",
     "prepublishOnly": "npm run lint && npm run typecheck && npm run test && npm run build && find dist -name '*.map' -delete && find dist -name '*.tsbuildinfo' -delete && npm pack --dry-run",
     "verify": "npm run lint && npm run typecheck && npm run test"
   },
@@ -35,6 +39,10 @@
     "llm",
     "agent",
     "multi-agent",
+    "code-review",
+    "design-review",
+    "evidence",
+    "sarif",
     "synthesis",
     "conductor"
   ],
@@ -60,11 +68,15 @@
     "node": ">=22.19.0"
   },
   "peerDependencies": {
-    "@earendil-works/pi-ai": ">=0.80.6 <1.0.0"
+    "@earendil-works/pi-ai": ">=0.80.6 <0.81.0"
+  },
+  "dependencies": {
+    "yaml": "^2.8.1"
   },
   "devDependencies": {
     "@earendil-works/pi-ai": "^0.80.6",
     "@types/node": "^24.0.10",
+    "esbuild": "^0.28.1",
     "typescript": "^5.8.3",
     "vitest": "^3.2.4"
   }

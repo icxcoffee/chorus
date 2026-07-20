@@ -46,12 +46,11 @@ export const preset: ChorusPreset = {
   ],
   conductor: { provider: "deepseek", modelId: "deepseek-v4-flash" },
   mode: "direct",
-  strategy: "A",
-  optimizeBeforeAsk: false
+  strategy: "parallel"
 };
 
 export const config: ChorusConfigFile = {
-  configVersion: 1,
+  configVersion: 2,
   activePresetName: "default",
   presets: [preset]
 };

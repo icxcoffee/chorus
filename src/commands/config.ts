@@ -109,13 +109,18 @@ export async function handleConfig(ctx: PiLikeContext, rawArgs = ""): Promise<vo
       notify(ctx, preset, "warning");
       return;
     }
+    const previousReviewRoleModels = config.presets.find((candidate) => candidate.name === preset.name)?.reviewRoleModels;
+    const updatedPreset: ChorusPreset = {
+      ...preset,
+      ...(previousReviewRoleModels ? { reviewRoleModels: previousReviewRoleModels } : {})
+    };
     const updated = {
       ...config,
-      activePresetName: preset.name,
-      presets: [preset, ...config.presets.filter((candidate) => candidate.name !== preset.name)]
+      activePresetName: updatedPreset.name,
+      presets: [updatedPreset, ...config.presets.filter((candidate) => candidate.name !== updatedPreset.name)]
     };
     await saveConfigFromUi({ config: updated, registry, ...(ctx.storePaths ? { paths: ctx.storePaths } : {}) });
-    show(ctx, `chorus config saved\n${describePresetForCommand(preset)}`);
+    show(ctx, `chorus config saved\n${describePresetForCommand(updatedPreset)}`);
     return;
   }
   notify(ctx, "Usage: /chorus config [show|active <name>|mode <direct|subagent>|history <on|off>|timeout [voice|conductor] <Ns|Nm|Nh|default>|models <voice...> --conductor <model>]", "warning");
@@ -239,15 +244,10 @@ async function handleInteractiveConfig(
     });
     if (!conductor) continue;
     const preset: ChorusPreset = {
-      name: active.name,
+      ...active,
       voices: pickedVoices.map((model, index) => ({ model, role: DEFAULT_ROLES[index] ?? "balanced" })),
       conductor,
-      mode: active.mode,
-      strategy: "A",
-      optimizeBeforeAsk: false,
-      ...(active.includeSessionHistory ? { includeSessionHistory: active.includeSessionHistory } : {}),
-      ...(active?.voiceTimeoutMs ? { voiceTimeoutMs: active.voiceTimeoutMs } : {}),
-      ...(active?.conductorTimeoutMs ? { conductorTimeoutMs: active.conductorTimeoutMs } : {})
+      strategy: "parallel",
     };
     currentConfig = {
       ...currentConfig,
@@ -290,8 +290,7 @@ function buildPresetFromModelArgs(args: string[], registry: ModelInfo[]): Chorus
     voices,
     conductor,
     mode: "direct",
-    strategy: "A",
-    optimizeBeforeAsk: false
+    strategy: "parallel"
   };
 }
 

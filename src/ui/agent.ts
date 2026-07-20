@@ -3,6 +3,7 @@ import { runChorus, type RunChorusArgs } from "../chorus.js";
 import { renderResult } from "./result.js";
 import { findPreset } from "./ask.js";
 import { modelRefToPiArg } from "../utils/models.js";
+import { runOptionsFromPreset } from "../runtime/preset.js";
 
 export interface AgentUiResult {
   text: string;
@@ -22,25 +23,20 @@ export async function runAgentUi(args: {
 } & Pick<RunChorusArgs, "fetchImpl" | "modelRegistry" | "storePaths" | "appendHistory" | "voiceTimeoutMs" | "conductorTimeoutMs" | "cwd" | "artifactDir">): Promise<AgentUiResult> {
   const preset = findPreset(args.config, args.presetName ?? args.config.activePresetName);
   const result = await (args.runChorusImpl ?? runChorus)({
-    runConfig: {
-      presetName: preset.name,
-      voices: preset.voices,
-      conductor: preset.conductor,
+    ...runOptionsFromPreset(preset, {
       mode: "subagent",
-      strategy: preset.strategy,
-      includeSessionHistory: preset.includeSessionHistory ?? false
-    },
+      synthesisMode: "agent",
+      ...(args.voiceTimeoutMs !== undefined ? { voiceTimeoutMs: args.voiceTimeoutMs } : {}),
+      ...(args.conductorTimeoutMs !== undefined ? { conductorTimeoutMs: args.conductorTimeoutMs } : {})
+    }),
     prompt: args.task,
     registry: args.registry,
     signal: args.signal,
-    synthesisMode: "agent",
     ...(args.optimizedPrompt ? { optimizedPrompt: args.optimizedPrompt } : {}),
     ...(args.fetchImpl ? { fetchImpl: args.fetchImpl } : {}),
     ...(args.modelRegistry ? { modelRegistry: args.modelRegistry } : {}),
     ...(args.storePaths ? { storePaths: args.storePaths } : {}),
     ...(args.appendHistory ? { appendHistory: args.appendHistory } : {}),
-    ...(args.voiceTimeoutMs ?? preset.voiceTimeoutMs ? { voiceTimeoutMs: args.voiceTimeoutMs ?? preset.voiceTimeoutMs } : {}),
-    ...(args.conductorTimeoutMs ?? preset.conductorTimeoutMs ? { conductorTimeoutMs: args.conductorTimeoutMs ?? preset.conductorTimeoutMs } : {}),
     ...(args.cwd ? { cwd: args.cwd } : {}),
     ...(args.artifactDir ? { artifactDir: args.artifactDir } : {}),
     onProgress: (updates) => {

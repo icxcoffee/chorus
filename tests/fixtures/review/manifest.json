@@ -1,0 +1,80 @@
+{
+    "version": 1,
+    "cases": [
+        {
+            "id": "security-missing-auth",
+            "description": "A protected account route loads and returns account data without authorization.",
+            "root": "security-missing-auth",
+            "expectedDecision": "request-changes",
+            "expectedFindings": [
+                {
+                    "id": "missing-authorization",
+                    "category": "security",
+                    "severity": "high",
+                    "locations": [{ "path": "routes.js", "startLine": 1, "endLine": 3 }]
+                }
+            ]
+        },
+        {
+            "id": "performance-sequential-io",
+            "description": "Independent remote reads are awaited sequentially in a request path.",
+            "root": "performance-sequential-io",
+            "expectedDecision": "approve",
+            "expectedFindings": [
+                {
+                    "id": "sequential-io",
+                    "category": "performance",
+                    "severity": "medium",
+                    "locations": [{ "path": "summary.js", "startLine": 2, "endLine": 3 }]
+                }
+            ]
+        },
+        {
+            "id": "clean-validation",
+            "description": "A small route validates and authorizes before accessing data.",
+            "root": "clean-validation",
+            "expectedDecision": "approve",
+            "expectedFindings": [],
+            "disallowedFindingTitles": ["Missing input validation", "Missing authorization"]
+        },
+        {
+            "id": "ambiguous-external-policy",
+            "description": "Authorization depends on unavailable deployment policy and should remain unresolved.",
+            "root": "ambiguous-external-policy",
+            "expectedDecision": "needs-investigation",
+            "expectedFindings": []
+        },
+        {
+            "id": "design-missing-rollback",
+            "description": "A queue migration design omits mixed-version compatibility and rollback criteria.",
+            "workflow": "design-review",
+            "root": "design-missing-rollback",
+            "scopePaths": ["design.md"],
+            "expectedDecision": "request-changes",
+            "expectedFindings": [
+                {
+                    "id": "missing-rollback",
+                    "category": "architecture",
+                    "severity": "high",
+                    "locations": [{ "path": "design.md" }]
+                }
+            ]
+        },
+        {
+            "id": "architecture-shared-state",
+            "description": "A multi-process worker design relies on process-local state without coordination.",
+            "workflow": "architecture-review",
+            "root": "architecture-shared-state",
+            "scopePaths": ["architecture.md"],
+            "expectedDecision": "needs-investigation",
+            "expectedFindings": [
+                {
+                    "id": "process-local-state",
+                    "category": "architecture",
+                    "severity": "high",
+                    "locations": [{ "path": "architecture.md" }]
+                }
+            ]
+        }
+    ]
+}

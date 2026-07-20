@@ -59,6 +59,9 @@ export function renderExpanded(result: ChorusResult, options: RenderResultOption
     "",
     "## Run Summary"
   ];
+  if (result.strategy) {
+    lines.push(`- Strategy: ${result.strategy.id} | rounds ${result.strategy.rounds.map((round) => `${round.name}:${round.voices.filter((voice) => voice.status === "success").length}/${round.voices.length}`).join(", ")}`);
+  }
   for (const [index, voice] of result.voices.entries()) {
     lines.push(`- ${voiceSummary(index, voice, actorLabel)}`);
   }

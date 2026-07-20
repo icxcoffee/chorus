@@ -15,6 +15,7 @@ import { getProviderAdapter, resolveModel } from "./utils/models.js";
 import { redactSensitive } from "./utils/redact.js";
 import { assertSafeEndpoint } from "./providers/adapters.js";
 import { VoiceTimeoutError, withTimeout } from "./utils/timeout.js";
+import { retry, RetryError, type RetryPolicy } from "./runtime/retry.js";
 
 export { redactSensitive as sanitizeProviderMessage } from "./utils/redact.js";
 
@@ -28,6 +29,7 @@ export interface DirectVoiceArgs {
     signal: AbortSignal;
     fetchImpl?: typeof fetch;
     onProgress?: (update: PartialVoiceProgress) => void;
+    retryPolicy?: RetryPolicy;
 }
 
 export interface DirectModelCallArgs {
@@ -38,6 +40,7 @@ export interface DirectModelCallArgs {
     modelRegistry?: RegistryLike;
     signal: AbortSignal;
     fetchImpl?: typeof fetch;
+    structuredOutput?: boolean;
 }
 
 export interface DirectModelCallResult {
@@ -54,9 +57,7 @@ export async function runDirectVoice(
     const voiceIndex = args.voiceIndex ?? 0;
     args.onProgress?.({ voiceIndex, voice: args.voice, status: "running" });
     try {
-        const result = await withTimeout(
-            (voiceSignal) =>
-                callDirectModel({
+        const call = (voiceSignal: AbortSignal) => callDirectModel({
                     model: args.voice.model,
                     prompt: args.prompt,
                     systemPrompt: ROLE_SYSTEM_PROMPTS[args.voice.role ?? "balanced"],
@@ -64,10 +65,11 @@ export async function runDirectVoice(
                     ...(args.modelRegistry ? { modelRegistry: args.modelRegistry } : {}),
                     signal: voiceSignal,
                     ...(args.fetchImpl ? { fetchImpl: args.fetchImpl } : {}),
-                }),
-            args.timeoutMs,
-            args.signal,
-        );
+                });
+        const execute = async (voiceSignal: AbortSignal) => args.retryPolicy
+            ? (await retry(() => call(voiceSignal), args.retryPolicy!, voiceSignal)).value
+            : call(voiceSignal);
+        const result = await withTimeout(execute, args.timeoutMs, args.signal);
         const voiceResult: VoiceResult = {
             voice: args.voice,
             status: "success",
@@ -114,7 +116,6 @@ export async function runDirectVoice(
 export async function callDirectModel(
     args: DirectModelCallArgs,
 ): Promise<DirectModelCallResult> {
-    const resolved = resolveModel(args.model, args.registry);
     if (!args.fetchImpl && args.modelRegistry) {
         const result = await callPiModel({
             model: args.model,
@@ -127,10 +128,11 @@ export async function callDirectModel(
         return {
             output: result.output,
             costUsd: result.costUsd,
-            resolved,
+            resolved: result.resolved,
             ...(result.usage ? { usage: result.usage } : {}),
         };
     }
+    const resolved = resolveModel(args.model, args.registry);
     if (!resolved.endpoint) {
         throw new Error(
             `model ${resolved.ref.provider}/${resolved.ref.modelId} has no endpoint; run inside Pi with modelRegistry or configure an endpoint`,
@@ -143,14 +145,13 @@ export async function callDirectModel(
         prompt: args.prompt,
         systemPrompt: args.systemPrompt,
         signal: args.signal,
+        ...(args.structuredOutput ? { structuredOutput: true } : {}),
     });
     const fetchImpl = args.fetchImpl ?? fetch;
-    const response = await fetchImpl(request.url, request.init);
+    const response = await fetchImpl(request.url, { ...request.init, redirect: "error" });
     const responseJson = await safeJson(response);
     if (!response.ok) {
-        throw new Error(
-            redactSensitive(adapter.parseError(responseJson, response.status)),
-        );
+        throw new RetryError(redactSensitive(adapter.parseError(responseJson, response.status)), undefined, response.status);
     }
     const parsed = adapter.parseResponse(responseJson);
     return {

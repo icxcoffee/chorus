@@ -28,6 +28,7 @@ export function renderJob(job: ChorusJob): string {
     job.prompt,
     "",
     ...(job.result?.outputDir ? ["Result Files", job.result.outputDir, ""] : []),
+    ...(job.reviewArtifacts?.length ? ["Review Artifacts", ...job.reviewArtifacts.map((artifact) => `- ${artifact.label}: ${artifact.path}`), ""] : []),
     "Agents"
   ];
   for (const voice of job.voices) {
@@ -41,4 +42,12 @@ export function renderJob(job: ChorusJob): string {
   if (job.status === "stale") lines.push("This job was running before reload and cannot be reattached.");
   if (job.status === "running") lines.push(`Cancel: /chorus cancel ${job.id}`);
   return lines.join("\n");
+}
+
+export function renderReviewWidget(job: ChorusJob): string[] {
+  return [
+    `${job.title} · ${job.id}`,
+    `Stage: ${job.reviewStage ? `${job.reviewStage.id} (${job.reviewStage.status})` : "starting"}`,
+    ...job.voices.map((voice) => `${voice.status === "running" ? ">" : "-"} ${voice.label}: ${voice.status}${voice.errorMessage ? ` · ${firstLine(voice.errorMessage, 80)}` : ""}`),
+  ];
 }

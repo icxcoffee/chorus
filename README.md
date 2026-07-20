@@ -7,9 +7,90 @@
 
 **English** | [中文](README.zh-CN.md)
 
-Chorus is a Pi extension that sends one prompt to multiple LLM voices in parallel — Claude, GPT, GLM, DeepSeek, or any provider your Pi registry knows about — then asks a distinct conductor model to synthesize the successful responses.
+**Chorus is a programmable AI Review Engine.** It organizes multiple expert roles into a bounded review process and produces evidence-based decisions instead of merely aggregating model responses. Models are replaceable participants; workflows, roles, source evidence, challenges, and review reports are the stable product contracts.
 
-## Example
+## Evidence-based review
+
+```text
+/chorus review code-review --profile quick --base origin/main --head HEAD review security and API compatibility
+```
+
+The built-in code workflow runs independent expert review, limited cross-review, one Global Devil challenge, source citation validation, and deterministic decision integration. `quick` uses three expert roles; `deep` uses architecture, security, performance, and maintainability. Architecture review instead uses architecture, reliability, security, and operability roles with system-level prompts and decision policy. Reports keep verified, disputed, rejected, and unsupported findings distinct.
+
+```text
+# Chorus 评审报告
+
+结论：需要修改
+
+## 已验证问题
+
+### 高：资源加载发生在鉴权之前
+证据：src/routes/users.ts:84-91 [已验证]
+提出角色：security | 确认角色：architect
+
+## 存在争议的问题
+
+核对引用的 finally 块后，连接泄漏结论被驳回。
+```
+
+`quick` bounds interactive diff review to fewer expert roles and challenges. Each expert contributes at most three material findings, and Global Devil examines at most five. Its seven execution slots are reserved for three independent experts, at most two cross-reviews, one Global Devil, and one Integrator. Execution counts, source-inspection tool calls, and agent turns are hard limits. Input, output, and cost allocations are measured after each model call because the Pi subprocess cannot reliably stop midway through a structured JSON response; an overrun is reported and degrades execution status, while reserved downstream stages remain available. `deep` uses the full committee, larger finding limits, larger budgets, and higher inspection-depth limits for repository or architecture review. Reaching a tool-call or turn boundary stops further inspection and triggers a no-tool structured finalization from the material already collected. Neither profile stops a review based on elapsed wall-clock time; Duration is reported as an observed metric.
+
+The original ask/agent fan-out APIs remain available as compatibility workflows.
+
+### Run locally
+
+```bash
+npm install
+npm run build
+pi -e ./src/index.ts
+```
+
+Then configure models and run a review inside Pi:
+
+```text
+/chorus config
+/chorus review code-review --profile quick review security and API compatibility
+/chorus review code-review --staged --fail-on high --summary /tmp/chorus-summary.json review this change
+```
+
+Common review options:
+
+| Option | Purpose |
+| --- | --- |
+| `--profile quick\|deep` | Select bounded interactive or full-committee review |
+| `--staged` | Review the staged Git diff |
+| `--base <ref> --head <ref>` | Review a Git revision range; use both together |
+| `--constraint <text>` | Add a review constraint; repeatable |
+| `--format markdown\|json\|github\|sarif` | Select the displayed renderer |
+| `--language zh-CN\|en` | Select report language; defaults to Simplified Chinese |
+| `--file <definition.yaml>` | Load a constrained Review DSL definition |
+| `--fail-on <severity> --summary <path>` | Evaluate CI policy and write a JSON summary |
+
+Run `/chorus review` without an objective to use the interactive review composer. It shows the effective workflow, profile, scope, and renderer before submission. `Settings` changes those values for this run without modifying the active Agent/Ask preset; switching workflows automatically removes incompatible scopes.
+
+```text
+------------------------------------------------------------------------
+ Chorus Review draft
+ Workflow: code-review | Profile: quick
+ Scope: repository | Output: markdown
+
+ Optional focus (blank = workflow default)
+
+ [Submit]   Settings    Optimize    Cancel
+------------------------------------------------------------------------
+```
+
+The focus field is optional. Submit it blank to use the selected workflow's built-in objective, or enter only the extra emphasis for this run, such as `focus on authorization and API compatibility; avoid broad redesign`. Review reports default to Simplified Chinese; select `Language: en` in Settings or pass `--language en` for English. The Settings panel also supports workflow, quick/deep profile, a per-role model override (`Auto` or any callable model), repository/files/document/diff scope, working/staged diff selection, comma-separated paths, and Markdown/JSON/GitHub/SARIF output. On a model row, press Enter or start typing to search by provider, model ID, or display name; left/right still cycles quickly. Role model choices are saved as defaults on the active Chorus preset and reused by later interactive and command-line Reviews; selecting `Auto` removes that role's saved override. Explicit Review DSL model policies remain authoritative. The resolved assignments are shown in the persistent started card. The draft remains intact when opening or closing Settings. Optimize now submits the optimized objective to the review while retaining the original objective in job metadata.
+
+While a Review runs, Chorus keeps a compact widget above the editor showing the active stage plus every `role provider/model: status`. `/chorus watch <jobId>` keeps a node's error summary visible above its scrollable partial output and activity log. The scheduler defaults to five global reviewers and one reviewer per provider; preset `maxConcurrency` and `providerConcurrency` may explicitly change those limits. Quick/deep control inspection depth through stage-specific tool-call limits; they do not impose workflow or per-execution time limits. For Review subagents, the preset voice timeout remains an inactivity guard and resets whenever Pi emits stdout or stderr. Rate-limit, network, inactivity-timeout, and provider 5xx failures retry up to three attempts with bounded backoff. Partial output and bounded activity context survive a stalled inspection, a depth boundary, or an unusable successful response and are passed to a no-tool JSON finalization attempt. If that still fails, Auto routing prefers a same-provider model while retaining a bounded cross-provider committee fallback when available; explicit DSL fallbacks may also cross providers. Every fallback transfers its scheduler permit to the actual provider, preserving provider concurrency limits. Permanent failures report the stage, role, actual model, attempts, and category without retrying.
+
+Reviewer-node failures are isolated: remaining roles and integration continue, and incomplete coverage produces a `needs-investigation` report with Job status `degraded` instead of falsely reporting complete success. Cross-review candidates are severity/evidence prioritized and run through the same global and per-provider concurrency controls as independent reviewers. Markdown reports show Complete/Degraded execution separately from the review decision, per-stage planned/usable/failed/omitted counts with their units, end-to-end wall-clock Duration, usable versus empty-result roles, and files represented by citations or explicit scope. These represented-file counts are not claimed as an exhaustive repository inspection trace. Compact execution diagnostics are kept separate from user-facing unresolved questions; full error chains and normalization notes remain in stage/execution artifacts. Common safe shape deviations are normalized before strict evidence validation, including missing evidence IDs/kinds and numeric line arrays. An invalid evidence item, Finding, or Devil challenge is isolated instead of discarding valid siblings. Source validation and Finding acceptance are separate: matching citations leave a Finding proposed, while a source-backed supporting challenge promotes its verified evidence into the Finding before verification. Source-backed objections may dispute or reject it. Integrator status corrections use the same structured, source-validated resolution contract and can close prior questions answered by normalized evidence, but deterministic coverage gaps remain. Evidence reads are capped at 2 MiB with four-worker validation. Role status becomes `success` only after normalized output passes validation, while an intentionally omitted stage is shown as `skipped`. Files and diff content are snapshotted, and a cited source that changes during the run is marked stale and degrades execution coverage. Global Devil is skipped when there are no findings to challenge. Only request/configuration, scope, persistence, or internal framework failures terminate the workflow.
+
+See [Review Engine Guide](docs/REVIEW_ENGINE.md) for workflow scope rules, DSL, artifacts, CI exit codes, the `chorus_review` tool, live evaluation, security boundaries, and current limitations.
+
+Review recovery uses a non-persisted, bounded source context separate from the compact activity log and supplies the full JSON contract to finalization. Completed roles with only coverage gaps are shown as `empty`; prior unresolved questions remain unless the Integrator closes them from normalized evidence, concurrent budget usage is accumulated per stage, and streaming activity snapshots no longer duplicate growing partial output.
+
+## Ask Compatibility Example
 
 One prompt is fanned out to multiple voices in parallel; a distinct conductor model then synthesizes **consensus**, **disagreements**, and a **final answer**.
 
@@ -47,7 +128,7 @@ Each voice's full output is persisted under `~/.pi/agent/chorus/results/<jobId>/
 
 ### Agent example: architecture review
 
-`/chorus agent` is codebase-aware. Each child agent runs in the repo with full tool access (read files, run builds, trace call paths), then a main verification conductor cross-checks their claims against the actual code.
+`/chorus agent` is codebase-aware. Child agents default to the `read-only` permission profile; write-capable profiles require explicit opt-in. A main verification conductor cross-checks their claims against the actual code.
 
 ```text
 /chorus agent review the architecture of this project: where are the seams that could split into modules, and what logic is duplicated across direct and subagent mode?
@@ -60,15 +141,15 @@ Preset: default | Agents: 2/2 | Duration: 14m | Cost: $0.016
 ## Final Answer
 
 ### Verified findings
-- **Mode duplication** - both agents flag that `runDirect` and `runSubagent` re-implement voice fan-out, timeout handling, and cost rollup independently. VERIFIED: `runtime/voice-runner.ts` is shared, but the direct/subagent entry points still duplicate the result-shape assembly.
-- **Hardcoded concurrency** - both agents note voice concurrency is fixed at 3 with no preset override. VERIFIED in `runtime/job-runner.ts`.
+- **Mode duplication** - both agents flag that `runDirectVoice` and `runSubagentVoice` expose separate provider and process boundaries. RESOLVED: `runtime/execution-coordinator.ts` now owns shared voice fan-out, timeout, budget, retry, and result assembly.
+- **Hardcoded concurrency** - both agents found that voice concurrency was fixed at 3 with no preset override. RESOLVED: concurrency is preset-configurable and now defaults to 5.
 
 ### Overstated / rejected
 - Agent[1] claimed `malformedLines` is dead code - INCORRECT, it is thrown in `subagent.ts:141`.
 - Agent[0] framed the registry-empty path as critical; the default `callPiModel` path bypasses it, so real severity is low.
 
 ### Final Answer
-Consolidate the direct/subagent result assembly behind one helper, and surface concurrency as a preset field. The two rejected claims show why the verification step matters: agents can be confident and wrong.
+The runtime now shares bounded execution and exposes concurrency through presets. The two rejected claims show why the verification step matters: agents can be confident and wrong.
 
 ## Run Summary
 - OK agent[0] model A | 11m | $0.009
@@ -85,6 +166,8 @@ Running `/chorus agent` (or `/chorus ask`) with no arguments opens an interactiv
 ```text
 ------------------------------------------------------------------------
  Chorus Agent Task draft
+ Preset: default | Strategy: parallel
+ Execution: subagent | Voices: 3
 
  Agent task
 
@@ -131,18 +214,26 @@ The extension registers:
 - `/chorus config` for preset management and first-run validation.
 - `/chorus ask [question...]` for running the active preset.
 - `/chorus agent [task...]` for codebase-aware multi-agent runs. Child agents run first, then the conductor runs as a main verification agent over their outputs.
+- `/chorus review [workflow] [objective...]` for role-based, evidence-backed code, architecture, or design review. Supports `--profile`, git diff scope, renderer, DSL file, and CI policy options.
+- `/chorus review-eval --live <manifest.json>` for an explicit paid single-reviewer versus committee comparison; it never runs implicitly in CI.
 - `/chorus jobs` lists recent background jobs.
 - `/chorus job <jobId>` shows one job snapshot and points to result files when available.
-- `/chorus watch <jobId> [agent-index]` opens a live TUI view for one running or completed job.
+- `/chorus watch <jobId> [agent-index]` opens a live, color-coded TUI view for one running or completed job. Use left/right or Tab to switch roles, Up/Down to scroll, PageUp/PageDown to move a page, and Home/End or `g`/`G` to jump to the beginning/end. Mouse wheel input is not exposed by Pi's custom-component API.
 - `/chorus cancel <jobId>` aborts a running job.
+- `/chorus resume <jobId>` validates reusable artifacts and launches a new attempt for incomplete stages.
+- `/chorus history list|search|export|prune` manages persisted run history without printing full prompts in compact listings.
+- `/chorus history show|compare|replay` inspects, compares, or reruns a selected run; replay requires `snapshot` or `current` explicitly.
+- `/chorus batch <dataset.jsonl> [preset...]` runs a resumable dataset and writes per-case plus Markdown/JSON/CSV reports.
 - `/chorus optimize [prompt...]` for manual prompt rewriting only.
 - `chorus_answer` with `{ "prompt": string, "presetName"?: string }` for Agent tool use.
+- `chorus_review` with an objective or constrained JSON/YAML `definitionPath` for structured Review Engine use.
 
 The free-text commands each have two equivalent forms - a subcommand and a direct alias - that parse arguments identically:
 
 ```text
 /chorus ask <question>      ≡  /chorus-ask <question>
 /chorus agent <task>        ≡  /chorus-agent <task>
+/chorus review <objective>  ≡  /chorus-review <objective>
 /chorus optimize <prompt>   ≡  /chorus-optimize <prompt>
 /chorus config [action]     ≡  /chorus-config [action]
 ```
@@ -152,6 +243,12 @@ Use whichever you prefer; both feed the same prompt string to the voices. (Quote
 ## Modes
 
 Direct mode calls provider APIs through adapters and computes cost from provider usage and model pricing. Subagent mode spawns `pi --mode json -p --no-session --model provider/modelId` for codebase-aware voice runs and parses NDJSON usage/cost events.
+
+The evolved runtime also provides stable strategy runners (`parallel`, `debate`, `rank`, `refine`), optional budgets/retry/routing/cache/batch APIs, typed local events, resumable checkpoints, and bounded conductor streaming. See [Architecture](docs/ARCHITECTURE.md) for ownership, defaults, privacy, and rollback details.
+
+Preset JSON may opt into `budget` (`maxUsd`, `maxInputTokens`, `maxOutputTokens`, `maxVoices`, `conductorReserveUsd`) and `cachePolicy` (`enabled`, `ttlMs`, `maxEntries`, `bypass`). Cache is forcibly disabled for subagent/session-history runs unless explicitly allowed. Budgeted runs launch voices serially so actual usage can stop queued work before it exceeds the configured limit.
+
+Subagent `permissionProfile` supports `read-only`, `workspace-write`, and `full`. Read-only is enforced with Pi's `--tools read,grep,find,ls`. Workspace write excludes `bash` and requires `CHORUS_ALLOW_WORKSPACE_WRITE=1`; full requires `CHORUS_ALLOW_FULL_ACCESS=1`. Pi cannot constrain edit/write to the current directory, so write-capable profiles are explicit trust decisions.
 
 ### Session history sharing
 
@@ -192,7 +289,7 @@ Use config commands to switch mode and timeouts:
 `/chorus ask` and `/chorus agent` are **not** a "direct mode" / "subagent mode" pair — they are two different run shapes:
 
 - **`/chorus ask`** runs the active preset's voices and synthesizes the responses. The preset's `mode` (direct or subagent, configured via `/chorus config mode`) decides how each voice is invoked. Use it for free-form questions where code-repo access is not needed.
-- **`/chorus agent`** is always subagent mode and always codebase-aware: child agents run with full tool access (read files, bash, git, etc.) and produce evidence under `results/<jobId>/`. A separate **main verification conductor** then runs as a fresh agent over the evidence file to verify or reject the child agents' claims. Use it for tasks that need the agents to actually explore the repo.
+- **`/chorus agent`** is always subagent mode and always codebase-aware: child agents use the configured permission profile (read-only by default) and produce evidence under `results/<jobId>/`. A separate **main verification conductor** then runs as a fresh agent over the evidence file to verify or reject the child agents' claims. Use it for tasks that need the agents to actually explore the repo.
 
 Other concrete differences:
 
@@ -210,7 +307,7 @@ In short: pick `ask` for "compare answers from these N models" and `agent` for "
 
 Config and history live under `~/.pi/agent/chorus/`:
 
-- `config.json` stores `{ configVersion: 1, activePresetName, presets }`.
+- `config.json` stores `{ configVersion: 2, activePresetName, presets }`. Each preset may include validated `reviewRoleModels` defaults. Version 1 files are migrated atomically after validation; legacy strategies `A/B/C` map to `parallel/debate/rank`. Optional `includeSessionHistory` defaults to `false`, and voice/conductor timeouts default to 30 minutes. `optimizeBeforeAsk` is no longer part of v2; legacy `true` values are rejected because prompt optimization remains an explicit workflow.
 - `history.jsonl` appends one full `ChorusResult` per run.
 - `jobs.json` stores recent background job snapshots. Running jobs from a previous Pi process are marked `stale` because they cannot be reattached after reload.
 - `results/<jobId>/` stores agent run artifacts such as `request.md`, `main-agent-input.md`, `agent-0.md`, `agent-0-activity.md`, `main-agent-activity.md`, `final-report.md`, and `result.json`.

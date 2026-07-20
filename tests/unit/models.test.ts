@@ -35,6 +35,18 @@ describe("model utilities", () => {
     expect(() => validatePreset({ ...preset, conductorTimeoutMs: 21_600_000 }, registry)).not.toThrow();
     expect(() => validatePreset({ ...preset, voiceTimeoutMs: 999 }, registry)).toThrow("voiceTimeoutMs");
     expect(() => validatePreset({ ...preset, conductorTimeoutMs: 999 }, registry)).toThrow("conductorTimeoutMs");
+    expect(() => validatePreset({
+      ...preset,
+      reviewRoleModels: { architect: { provider: "deepseek", modelId: "deepseek-v4-pro" } }
+    }, registry)).not.toThrow();
+    expect(() => validatePreset({
+      ...preset,
+      reviewRoleModels: { architect: { provider: "missing", modelId: "missing" } }
+    }, registry)).toThrow("review role architect missing/missing");
+    expect(() => validatePreset({
+      ...preset,
+      reviewRoleModels: { "Bad Role": { provider: "deepseek", modelId: "deepseek-v4-pro" } }
+    }, registry)).toThrow("invalid role ID");
     expect(() =>
       validateConfigFile({ ...config, activePresetName: "missing" }, registry)
     ).toThrow("does not match any preset");

@@ -27,11 +27,15 @@ describe("commands/index", () => {
         toolDefinitions.push(definition);
       }
     });
-    expect(commands).toEqual(["chorus", "chorus-config", "chorus-ask", "chorus-agent", "chorus-optimize"]);
-    expect(tools).toEqual(["chorus_answer"]);
+    expect(commands).toEqual(["chorus", "chorus-config", "chorus-ask", "chorus-agent", "chorus-review", "chorus-review-eval", "chorus-optimize"]);
+    expect(tools).toEqual(["chorus_answer", "chorus_review"]);
     expect(commandDefinitions[0]).toMatchObject({ description: expect.any(String), handler: expect.any(Function) });
     expect(toolDefinitions[0]).toMatchObject({
       parameters: { properties: { prompt: { type: "string" } } },
+      execute: expect.any(Function)
+    });
+    expect(toolDefinitions[1]).toMatchObject({
+      parameters: { properties: { objective: { type: "string" } } },
       execute: expect.any(Function)
     });
   });

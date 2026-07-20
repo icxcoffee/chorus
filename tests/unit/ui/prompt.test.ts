@@ -12,6 +12,26 @@ import { visibleWidth } from "../../../src/ui/width.js";
 import { config, preset, registry, voiceResult } from "../fixtures.js";
 
 describe("ui/prompt", () => {
+  it("allows domain composers to submit an optional blank focus", async () => {
+    let rendered = "";
+    const result = await composePrompt({
+      ui: {
+        custom: async (factory) => await new Promise((resolve) => {
+          const view = factory({ requestRender: vi.fn() }, {}, {}, resolve);
+          rendered = view.render(80).join("\n");
+          view.handleInput({ name: "enter" });
+        })
+      },
+      title: "Chorus Review",
+      placeholder: "Optional focus (blank = workflow default)",
+      registry,
+      signal: new AbortController().signal,
+      allowEmpty: true
+    });
+    expect(result).toEqual({ original: "", prompt: "" });
+    expect(rendered).toContain("Optional focus (blank = workflow default)");
+  });
+
   it("handles normalized prompt composer action keys", async () => {
     const result = await composePrompt({
       ui: {
@@ -164,6 +184,38 @@ describe("ui/prompt", () => {
     expect(firstRender.join("\n")).toContain("Config");
     expect(secondRender.join("\n")).toContain("draft");
     expect(result?.prompt).toBe("draft");
+  });
+
+  it("renders dynamic context and a domain-specific settings label", async () => {
+    let calls = 0;
+    let profile = "quick";
+    const renders: string[][] = [];
+    const result = await composePrompt({
+      ui: {
+        custom: async (factory) =>
+          await new Promise((resolve) => {
+            calls += 1;
+            const view = factory({ requestRender: vi.fn() }, {}, {}, resolve);
+            if (calls === 1) view.handleInput("review auth");
+            renders.push(view.render(100));
+            if (calls === 1) {
+              view.handleInput({ name: "right" });
+              view.handleInput({ name: "enter" });
+            } else view.handleInput({ name: "enter" });
+          })
+      },
+      title: "Chorus Review",
+      placeholder: "Review objective",
+      registry,
+      signal: new AbortController().signal,
+      configureLabel: "Settings",
+      context: () => [`Profile: ${profile}`],
+      onConfigure: async () => { profile = "deep"; }
+    });
+    expect(renders[0]?.join("\n")).toContain("Profile: quick");
+    expect(renders[0]?.join("\n")).toContain("Settings");
+    expect(renders[1]?.join("\n")).toContain("Profile: deep");
+    expect(result?.prompt).toBe("review auth");
   });
 
   it("shows and clears a transient working message while optimizing from composer", async () => {

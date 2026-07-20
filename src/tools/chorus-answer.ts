@@ -4,6 +4,7 @@ import { renderResult } from "../ui/result.js";
 import { registryModels } from "../models/registry.js";
 import { loadOrBootstrap } from "../store/config.js";
 import { setChorusStatus } from "../runtime/pi-ui.js";
+import { runOptionsFromPreset } from "../runtime/preset.js";
 
 export async function chorusAnswerTool(
   ctx: PiLikeContext,
@@ -20,22 +21,14 @@ export async function chorusAnswerTool(
   const preset = config.presets.find((candidate) => candidate.name === presetName);
   if (!preset) throw new Error(`unknown chorus preset "${presetName}"`);
   const result = await runChorus({
-    runConfig: {
-      presetName: preset.name,
-      voices: preset.voices,
-      conductor: preset.conductor,
-      mode: preset.mode,
-      strategy: preset.strategy,
-      includeSessionHistory: preset.includeSessionHistory ?? false
-    },
+    ...runOptionsFromPreset(preset),
     prompt: args.prompt,
     registry,
     ...(ctx.modelRegistry ? { modelRegistry: ctx.modelRegistry } : {}),
     signal: ctx.signal ?? new AbortController().signal,
     ...(ctx.cwd ? { cwd: ctx.cwd } : {}),
     ...(ctx.storePaths ? { storePaths: ctx.storePaths } : {}),
-    ...(preset.voiceTimeoutMs ? { voiceTimeoutMs: preset.voiceTimeoutMs } : {}),
-    ...(preset.conductorTimeoutMs ? { conductorTimeoutMs: preset.conductorTimeoutMs } : {}),
+    onSynthesisDelta: (text) => onUpdate?.({ message: "chorus conductor streaming", delta: text }),
     onProgress: (updates) => {
       for (const update of updates) {
         const message = update.kind === "conductor"

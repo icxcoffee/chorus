@@ -1,8 +1,6 @@
-import { EventEmitter } from "node:events";
 import { chmod, mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { PassThrough } from "node:stream";
 import { describe, expect, it, vi } from "vitest";
 import {
     parseSubagentNdjson,
@@ -10,6 +8,7 @@ import {
     type SpawnLike,
 } from "../../src/subagent.js";
 import { preset } from "./fixtures.js";
+import { fakeChild } from "./helpers/subagent.js";
 
 describe("subagent", () => {
     it("parses message and usage events", () => {
@@ -227,7 +226,18 @@ describe("subagent", () => {
         expect(spawn.mock.calls[0]![1]).not.toContain("--no-session");
         expect(result.status).toBe("success");
     });
-
+    it("disables all tools for a bounded finalization run", async () => {
+        const child = fakeChild();
+        const spawn = vi.fn<SpawnLike>(() => child);
+        const promise = runSubagentVoice({ voice: preset.voices[0]!, prompt: "finalize", timeoutMs: 1000, signal: new AbortController().signal, spawnImpl: spawn, disableTools: true });
+        await vi.waitFor(() => expect(spawn).toHaveBeenCalled());
+        child.stdout.write(`${JSON.stringify({ type: "message_end", message: "{}" })}\n`);
+        child.emit("close", 0);
+        await promise;
+        const argv = spawn.mock.calls[0]![1];
+        expect(argv).toContain("--no-tools");
+        expect(argv).not.toContain("read,grep,find,ls");
+    });
     it("emits partial output from streaming Pi json events", async () => {
         const child = fakeChild();
         const spawn = vi.fn<SpawnLike>(() => child);
@@ -289,6 +299,23 @@ describe("subagent", () => {
         expect(result.activityLog).toContain("[tool start] read");
         expect(logs.at(-1)).toContain("[assistant] read complete");
     });
+    it("stops source exploration after the configured tool-call budget", async () => {
+        const child = fakeChild();
+        const spawn = vi.fn<SpawnLike>(() => child);
+        const promise = runSubagentVoice({
+            voice: preset.voices[0]!, prompt: "p", timeoutMs: 1000, maxToolCalls: 1,
+            signal: new AbortController().signal,
+            spawnImpl: spawn,
+        });
+        await vi.waitFor(() => expect(spawn).toHaveBeenCalled());
+        child.stdout.write(`${JSON.stringify({ type: "tool_execution_start", toolCallId: "t1", toolName: "read", args: { path: "src/a.ts" } })}\n`);
+        child.stdout.write(`${JSON.stringify({ type: "tool_execution_start", toolCallId: "t2", toolName: "read", args: { path: "src/b.ts" } })}\n`);
+        await vi.waitFor(() => expect(child.kills).toContain("SIGTERM"));
+        child.emit("close", null);
+        const result = await promise;
+        expect(result).toEqual(expect.objectContaining({ status: "error", errorMessage: "tool call limit exceeded (1 allowed)" }));
+        expect(result.activityLog).toContain("src/b.ts");
+    });
 
     it("turns stderr and malformed ndjson into errors", async () => {
         const child = fakeChild();
@@ -339,11 +366,19 @@ describe("subagent", () => {
             spawnImpl: spawn,
         });
         await vi.waitFor(() => expect(spawn).toHaveBeenCalled());
+        child.stdout.write(
+            `${JSON.stringify({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "partial finding" } })}\n`,
+        );
+        child.stdout.write(
+            `${JSON.stringify({ type: "tool_execution_start", toolCallId: "t1", toolName: "read", args: { path: "src/index.ts" } })}\n`,
+        );
         await new Promise((resolve) => setTimeout(resolve, 5));
         child.emit("close", null);
         const result = await promise;
         expect(result.status).toBe("error");
         expect(result.errorMessage).toContain("timed out");
+        expect(result.partialOutput).toBe("partial finding");
+        expect(result.activityLog).toContain("[tool start] read");
         expect(child.kills).toContain("SIGTERM");
 
         const controller = new AbortController();
@@ -384,6 +419,26 @@ describe("subagent", () => {
         expect(result.errorMessage).toContain("[redacted-api-key]");
     });
 
+    it("retains a bounded stderr tail and reports omitted bytes", async () => {
+        const child = fakeChild();
+        const spawn = vi.fn<SpawnLike>(() => child);
+        const promise = runSubagentVoice({
+            voice: preset.voices[0]!, prompt: "p", timeoutMs: 1000,
+            signal: new AbortController().signal, spawnImpl: spawn,
+        });
+        await vi.waitFor(() => expect(spawn).toHaveBeenCalled());
+        child.stderr.write(`prefix-secret sk-test-secret ${"x".repeat(300 * 1024)}`);
+        child.stderr.write("TAIL-MARKER Authorization: Bearer abc.def");
+        child.emit("close", 1);
+        const result = await promise;
+        expect(result.status).toBe("error");
+        expect(result.errorMessage).toContain("stderr truncated:");
+        expect(result.errorMessage).toContain("TAIL-MARKER");
+        expect(result.errorMessage).not.toContain("prefix-secret");
+        expect(result.errorMessage).not.toContain("abc.def");
+        expect(result.errorMessage!.length).toBeLessThan(270 * 1024);
+    });
+
     it("refuses to spawn in a world-writable cwd", async () => {
         const dir = await mkdtemp(join(tmpdir(), "chorus-unsafe-cwd-"));
         await chmod(dir, 0o777);
@@ -398,25 +453,48 @@ describe("subagent", () => {
         expect(result.status).toBe("error");
         expect(result.errorMessage).toContain("world-writable");
     });
+
+    it("defaults to read-only profile with an allowlisted child environment", async () => {
+        const child = fakeChild();
+        const spawn = vi.fn<SpawnLike>(() => child);
+        const promise = runSubagentVoice({
+            voice: preset.voices[0]!, prompt: "p", timeoutMs: 1000,
+            signal: new AbortController().signal, spawnImpl: spawn,
+        });
+        await vi.waitFor(() => expect(spawn).toHaveBeenCalled());
+        child.stdout.write(`${JSON.stringify({ type: "message_end", message: "ok" })}\n`);
+        child.emit("close", 0);
+        const result = await promise;
+        const options = spawn.mock.calls[0]![2];
+        expect(options.env).toMatchObject({ CHORUS_PERMISSION_PROFILE: "read-only" });
+        expect(spawn.mock.calls[0]![1]).toEqual(expect.arrayContaining(["--tools", "read,grep,find,ls", "--no-extensions"]));
+        expect(options.env).not.toHaveProperty("CHORUS_RANDOM_SECRET");
+        expect(result.permissionProfile).toBe("read-only");
+    });
+
+    it("fails closed for workspace mutation without explicit confirmation", async () => {
+        const result = await runSubagentVoice({
+            voice: preset.voices[0]!, prompt: "p", timeoutMs: 1000,
+            permissionProfile: "workspace-write", signal: new AbortController().signal,
+            spawnImpl: vi.fn<SpawnLike>(() => fakeChild()),
+        });
+        expect(result.status).toBe("error");
+        expect(result.errorMessage).toContain("CHORUS_ALLOW_WORKSPACE_WRITE");
+    });
+
+    it("uses Pi's write-only tool allowlist after explicit workspace confirmation", async () => {
+        const previous = process.env.CHORUS_ALLOW_WORKSPACE_WRITE;
+        process.env.CHORUS_ALLOW_WORKSPACE_WRITE = "1";
+        try {
+            const child = fakeChild(); const spawn = vi.fn<SpawnLike>(() => child);
+            const promise = runSubagentVoice({ voice: preset.voices[0]!, prompt: "p", timeoutMs: 1000, permissionProfile: "workspace-write", signal: new AbortController().signal, spawnImpl: spawn });
+            await vi.waitFor(() => expect(spawn).toHaveBeenCalled());
+            expect(spawn.mock.calls[0]![1]).toEqual(expect.arrayContaining(["--tools", "read,grep,find,ls,edit,write"]));
+            expect(spawn.mock.calls[0]![1]).not.toContain("bash");
+            child.stdout.write(`${JSON.stringify({ type: "message_end", message: "ok" })}\n`); child.emit("close", 0);
+            expect((await promise).status).toBe("success");
+        } finally {
+            if (previous === undefined) delete process.env.CHORUS_ALLOW_WORKSPACE_WRITE; else process.env.CHORUS_ALLOW_WORKSPACE_WRITE = previous;
+        }
+    });
 });
-
-type FakeChild = EventEmitter & {
-    stdout: PassThrough;
-    stderr: PassThrough;
-    kill: (signal?: NodeJS.Signals | number) => boolean;
-    exitCode: number | null;
-    kills: Array<NodeJS.Signals | number | undefined>;
-};
-
-function fakeChild(): FakeChild {
-    const child = new EventEmitter() as FakeChild;
-    child.stdout = new PassThrough();
-    child.stderr = new PassThrough();
-    child.exitCode = null;
-    child.kills = [];
-    child.kill = (signal?: NodeJS.Signals | number) => {
-        child.kills.push(signal);
-        return true;
-    };
-    return child;
-}

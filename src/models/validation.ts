@@ -15,9 +15,6 @@ export function validatePreset(preset: ChorusPreset, registry: ModelInfo[] = [])
     },
     registry
   );
-  if (preset.optimizeBeforeAsk !== false) {
-    throw new ValidationError(`preset ${preset.name} has unsupported optimizeBeforeAsk=true`);
-  }
   if (preset.includeSessionHistory !== undefined && typeof preset.includeSessionHistory !== "boolean") {
     throw new ValidationError(`preset ${preset.name} includeSessionHistory must be boolean`);
   }
@@ -27,10 +24,51 @@ export function validatePreset(preset: ChorusPreset, registry: ModelInfo[] = [])
   if (preset.conductorTimeoutMs !== undefined) {
     validateTimeoutMs(preset.conductorTimeoutMs, `preset ${preset.name} conductorTimeoutMs`);
   }
+  if (preset.maxConcurrency !== undefined && (!Number.isInteger(preset.maxConcurrency) || preset.maxConcurrency < 1 || preset.maxConcurrency > 8)) {
+    throw new ValidationError(`preset ${preset.name} maxConcurrency must be between 1 and 8`);
+  }
+  for (const [provider, limit] of Object.entries(preset.providerConcurrency ?? {})) {
+    if (!provider || !Number.isInteger(limit) || limit < 1 || limit > 8) {
+      throw new ValidationError(`preset ${preset.name} providerConcurrency has invalid limit for ${provider}`);
+    }
+  }
+  if (preset.permissionProfile !== undefined && !["read-only", "workspace-write", "full"].includes(preset.permissionProfile)) {
+    throw new ValidationError(`preset ${preset.name} has invalid permissionProfile`);
+  }
+  if (preset.reviewRoleModels !== undefined) {
+    if (!preset.reviewRoleModels || typeof preset.reviewRoleModels !== "object" || Array.isArray(preset.reviewRoleModels)) {
+      throw new ValidationError(`preset ${preset.name} reviewRoleModels must be an object`);
+    }
+    const entries = Object.entries(preset.reviewRoleModels);
+    if (entries.length > 64) throw new ValidationError(`preset ${preset.name} reviewRoleModels exceeds 64 roles`);
+    for (const [roleId, model] of entries) {
+      if (!/^[a-z0-9][a-z0-9._-]*(?:\/[a-z0-9][a-z0-9._-]*)?$/.test(roleId)) {
+        throw new ValidationError(`preset ${preset.name} reviewRoleModels has invalid role ID "${roleId}"`);
+      }
+      assertModelRef(model);
+      if (registry.length > 0) {
+        try {
+          resolveModel(model, registry);
+        } catch {
+          throw new ValidationError(`review role ${roleId} ${modelRefToPiArg(model)} is not in your model registry`);
+        }
+      }
+    }
+  }
+  for (const [name, value] of Object.entries(preset.budget ?? {})) {
+    if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || (name === "maxVoices" && (!Number.isInteger(value) || value < 1 || value > 8))) {
+      throw new ValidationError(`preset ${preset.name} budget has invalid ${name}`);
+    }
+  }
+  if (preset.cachePolicy?.enabled && preset.includeSessionHistory && !preset.cachePolicy.allowSessionHistory) {
+    throw new ValidationError(`preset ${preset.name} cache requires allowSessionHistory=true when session history is included`);
+  }
 }
 
 export function validateRunConfig(runConfig: ChorusRunConfig, registry: ModelInfo[] = []): void {
-  if (runConfig.strategy !== "A") throw new ValidationError("chorus v1 only supports strategy A");
+  if (!["parallel", "debate", "rank", "refine"].includes(runConfig.strategy)) {
+    throw new ValidationError(`unsupported chorus strategy "${String(runConfig.strategy)}"`);
+  }
   if (runConfig.mode !== "direct" && runConfig.mode !== "subagent") {
     throw new ValidationError(`invalid mode "${String(runConfig.mode)}"`);
   }
@@ -63,7 +101,7 @@ export function validateRunConfig(runConfig: ChorusRunConfig, registry: ModelInf
 }
 
 export function validateConfigFile(config: ChorusConfigFile, registry: ModelInfo[] = []): void {
-  if (config.configVersion !== 1) {
+  if (config.configVersion !== 2) {
     throw new ValidationError(
       `unsupported chorus configVersion ${String(config.configVersion)}; upgrade this extension or migrate config`
     );

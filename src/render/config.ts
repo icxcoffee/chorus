@@ -33,7 +33,8 @@ export function renderConfig(config: ChorusConfigFile, registry: ModelInfo[]): s
 
 export function describePresetForCommand(preset: ChorusPreset): string {
   const voices = preset.voices.map((voice, index) => `voice[${index}] ${modelRefToPiArg(voice.model)}`).join("\n  ");
-  return `preset ${preset.name} (${preset.mode})\n  session history ${preset.includeSessionHistory ? "include" : "isolated"}\n  voice timeout ${formatDurationMs(preset.voiceTimeoutMs ?? DEFAULT_VOICE_TIMEOUT_MS)}\n  conductor timeout ${formatDurationMs(preset.conductorTimeoutMs ?? DEFAULT_CONDUCTOR_TIMEOUT_MS)}\n  ${voices}\n  conductor ${modelRefToPiArg(preset.conductor)}`;
+  const reviewModels = Object.entries(preset.reviewRoleModels ?? {}).map(([roleId, model]) => `${roleId}=${modelRefToPiArg(model)}`).join(", ");
+  return `preset ${preset.name} (${preset.mode})\n  session history ${preset.includeSessionHistory ? "include" : "isolated"}\n  voice timeout ${formatDurationMs(preset.voiceTimeoutMs ?? DEFAULT_VOICE_TIMEOUT_MS)}\n  conductor timeout ${formatDurationMs(preset.conductorTimeoutMs ?? DEFAULT_CONDUCTOR_TIMEOUT_MS)}\n  review models ${reviewModels || "Auto"}\n  ${voices}\n  conductor ${modelRefToPiArg(preset.conductor)}`;
 }
 
 export function validateConfigForDisplay(config: ChorusConfigFile, registry: ModelInfo[]): string[] {

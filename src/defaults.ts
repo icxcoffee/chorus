@@ -65,8 +65,7 @@ export function computeDefaultPresetResult(registry: ModelInfo[]): DefaultPreset
     voices,
     conductor,
     mode: "direct",
-    strategy: "A",
-    optimizeBeforeAsk: false
+    strategy: "parallel"
   };
   return { presets: [preset], familyWarnings: familyWarnings(voices) };
 }

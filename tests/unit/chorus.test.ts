@@ -7,6 +7,9 @@ import type {
     ChorusVoice,
     VoiceResult,
 } from "../../src/types.js";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 describe("orchestrator", () => {
     it("fans out voices, synthesizes successes, aggregates cost, and appends history", async () => {
@@ -18,7 +21,7 @@ describe("orchestrator", () => {
                 voices: preset.voices,
                 conductor: preset.conductor,
                 mode: "direct",
-                strategy: "A",
+                strategy: "parallel",
             },
             prompt: "original",
             optimizedPrompt: "optimized",
@@ -46,11 +49,11 @@ describe("orchestrator", () => {
         expect(result.successfulVoices).toBe(2);
         expect(result.totalCostUsd).toBe(0.006);
         expect(history).toHaveLength(1);
-        expect(
-            progress
-                .filter((update) => update.kind === "conductor")
-                .map((update) => update.status),
-        ).toEqual(["running", "success"]);
+        const conductorStatuses = progress
+            .filter((update) => update.kind === "conductor")
+            .map((update) => update.status);
+        expect(conductorStatuses[0]).toBe("running");
+        expect(conductorStatuses.at(-1)).toBe("success");
     });
 
     it("skips synthesis with one success", async () => {
@@ -77,7 +80,7 @@ describe("orchestrator", () => {
                 voices: preset.voices,
                 conductor: preset.conductor,
                 mode: "direct",
-                strategy: "A",
+                strategy: "parallel",
             },
             prompt: "p",
             registry,
@@ -103,7 +106,7 @@ describe("orchestrator", () => {
                 voices: preset.voices,
                 conductor: preset.conductor,
                 mode: "direct",
-                strategy: "A",
+                strategy: "parallel",
             },
             prompt: "p",
             registry,
@@ -128,7 +131,7 @@ describe("orchestrator", () => {
                 voices: preset.voices,
                 conductor: preset.conductor,
                 mode: "subagent",
-                strategy: "A",
+                strategy: "parallel",
             },
             prompt: "p",
             registry,
@@ -156,7 +159,7 @@ describe("orchestrator", () => {
                 voices: preset.voices,
                 conductor: preset.conductor,
                 mode: "subagent",
-                strategy: "A",
+                strategy: "parallel",
                 includeSessionHistory: true,
             },
             prompt: "p",
@@ -181,7 +184,7 @@ describe("orchestrator", () => {
                 voices: preset.voices,
                 conductor: preset.conductor,
                 mode: "subagent",
-                strategy: "A",
+                strategy: "parallel",
             },
             prompt: "p",
             registry,
@@ -196,7 +199,7 @@ describe("orchestrator", () => {
         expect(result.synthesis).toBe("final");
     });
 
-    it("limits subagent fan-out concurrency", async () => {
+    it("uses the default subagent fan-out concurrency", async () => {
         const voiceModelIndexes = [0, 1, 2, 4, 0];
         const voices: ChorusVoice[] = voiceModelIndexes.map(
             (modelIndex, index) => ({
@@ -215,7 +218,7 @@ describe("orchestrator", () => {
                 voices,
                 conductor: preset.conductor,
                 mode: "subagent",
-                strategy: "A",
+                strategy: "parallel",
             },
             prompt: "p",
             registry,
@@ -232,7 +235,7 @@ describe("orchestrator", () => {
             appendHistory: async () => undefined,
         });
         expect(result.successfulVoices).toBe(5);
-        expect(maxActive).toBe(3);
+        expect(maxActive).toBe(5);
     });
 
     it("does not block returning on history append", async () => {
@@ -242,7 +245,7 @@ describe("orchestrator", () => {
                 voices: preset.voices,
                 conductor: preset.conductor,
                 mode: "direct",
-                strategy: "A",
+                strategy: "parallel",
             },
             prompt: "p",
             registry,
@@ -265,7 +268,7 @@ describe("orchestrator", () => {
                     voices: preset.voices,
                     conductor: preset.conductor,
                     mode: "direct",
-                    strategy: "A",
+                    strategy: "parallel",
                 },
                 prompt: "p",
                 registry: [],
@@ -284,7 +287,7 @@ describe("orchestrator", () => {
                 voices: preset.voices,
                 conductor: preset.conductor,
                 mode: "direct",
-                strategy: "A",
+                strategy: "parallel",
             },
             prompt: "p",
             registry,
@@ -298,6 +301,47 @@ describe("orchestrator", () => {
             true,
         );
     });
+
+    it("enforces token budgets before launching voices and conductor", async () => {
+        let calls = 0;
+        const result = await runChorus({
+            runConfig: { presetName: "default", voices: preset.voices, conductor: preset.conductor, mode: "direct", strategy: "parallel" },
+            prompt: "budgeted prompt",
+            registry,
+            signal: new AbortController().signal,
+            budget: { maxInputTokens: 1 },
+            runVoiceDirect: async (args) => { calls += 1; return { ...voiceResult(args.voiceIndex ?? 0), voice: args.voice }; },
+            appendHistory: async () => undefined,
+        });
+        expect(calls).toBe(0);
+        expect(result.budget?.terminationReason).toContain("input token");
+        expect(result.synthesis).toBeNull();
+    });
+
+    it("uses opt-in direct cache without double-counting provider cost", async () => {
+        const baseDir = await mkdtemp(join(tmpdir(), "chorus-run-cache-"));
+        let calls = 0;
+        const run = (models = registry) => runChorus({
+            runConfig: { presetName: "default", voices: preset.voices, conductor: preset.conductor, mode: "direct" as const, strategy: "parallel" as const },
+            prompt: "cacheable",
+            registry: models,
+            signal: new AbortController().signal,
+            storePaths: { baseDir },
+            cachePolicy: { enabled: true },
+            runVoiceDirect: async (args) => { calls += 1; return { ...voiceResult(args.voiceIndex ?? 0), voice: args.voice }; },
+            synthesizeFn: async () => ({ synthesis: "final", costUsd: 0 }),
+            appendHistory: async () => undefined,
+        });
+        await run();
+        const cached = await run();
+        expect(calls).toBe(2);
+        expect(cached.cache).toEqual({ enabled: true, hits: 2, misses: 0 });
+        expect(cached.voices.every((voice) => voice.cacheHit && voice.costUsd === 0)).toBe(true);
+        const changedEndpoint = await run(registry.map((model) => ({ ...model, endpoint: `${model.endpoint}/changed` })));
+        expect(calls).toBe(4);
+        expect(changedEndpoint.cache).toEqual({ enabled: true, hits: 0, misses: 2 });
+    });
+
 });
 
 async function runWithVoices(voices: VoiceResult[]): Promise<ChorusResult> {
@@ -307,7 +351,7 @@ async function runWithVoices(voices: VoiceResult[]): Promise<ChorusResult> {
             voices: preset.voices,
             conductor: preset.conductor,
             mode: "direct",
-            strategy: "A",
+            strategy: "parallel",
         },
         prompt: "p",
         registry,

@@ -2,6 +2,7 @@ import type { ChorusConfigFile, ChorusPreset, ModelInfo } from "../types.js";
 import { runChorus, type RunChorusArgs } from "../chorus.js";
 import { renderResult } from "./result.js";
 import { modelRefToPiArg } from "../utils/models.js";
+import { runOptionsFromPreset } from "../runtime/preset.js";
 
 export interface AskUiResult {
   text: string;
@@ -20,16 +21,11 @@ export async function runAskUi(args: {
   onProgress?: RunChorusArgs["onProgress"];
 } & Pick<RunChorusArgs, "fetchImpl" | "modelRegistry" | "storePaths" | "appendHistory" | "voiceTimeoutMs" | "conductorTimeoutMs">): Promise<AskUiResult> {
   const preset = findPreset(args.config, args.presetName ?? args.config.activePresetName);
-  const runConfig = {
-    presetName: preset.name,
-    voices: preset.voices,
-    conductor: preset.conductor,
-    mode: preset.mode,
-    strategy: preset.strategy,
-    includeSessionHistory: preset.includeSessionHistory ?? false
-  };
   const result = await (args.runChorusImpl ?? runChorus)({
-    runConfig,
+    ...runOptionsFromPreset(preset, {
+      ...(args.voiceTimeoutMs !== undefined ? { voiceTimeoutMs: args.voiceTimeoutMs } : {}),
+      ...(args.conductorTimeoutMs !== undefined ? { conductorTimeoutMs: args.conductorTimeoutMs } : {})
+    }),
     prompt: args.prompt,
     registry: args.registry,
     signal: args.signal,
@@ -38,8 +34,6 @@ export async function runAskUi(args: {
     ...(args.modelRegistry ? { modelRegistry: args.modelRegistry } : {}),
     ...(args.storePaths ? { storePaths: args.storePaths } : {}),
     ...(args.appendHistory ? { appendHistory: args.appendHistory } : {}),
-    ...(args.voiceTimeoutMs ?? preset.voiceTimeoutMs ? { voiceTimeoutMs: args.voiceTimeoutMs ?? preset.voiceTimeoutMs } : {}),
-    ...(args.conductorTimeoutMs ?? preset.conductorTimeoutMs ? { conductorTimeoutMs: args.conductorTimeoutMs ?? preset.conductorTimeoutMs } : {}),
     onProgress: (updates) => {
       args.onProgress?.(updates);
       for (const update of updates) {

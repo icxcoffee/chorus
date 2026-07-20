@@ -1,27 +1,35 @@
 import {
     mkdir,
     readFile,
-    rename,
-    writeFile,
     appendFile,
-    chmod,
     stat,
 } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
+import { createReadStream } from "node:fs";
+import { createInterface } from "node:readline";
 import type {
     ChorusConfigFile,
+    LegacyChorusConfigFileV1,
     ChorusPreset,
     ChorusResult,
     ModelInfo,
 } from "./types.js";
 import { validateConfigFile, validatePreset } from "./utils/models.js";
+import { atomicPrivateWrite, chmodPrivateBestEffort } from "./utils/private-file.js";
 
-export const CONFIG_VERSION = 1 as const;
+export const CONFIG_VERSION = 2 as const;
+export const CONFIG_V2_OPTIONAL_DEFAULTS = {
+    includeSessionHistory: false,
+    voiceTimeoutMs: 1_800_000,
+    conductorTimeoutMs: 1_800_000,
+} as const;
 export const HISTORY_WARNING_BYTES = 50 * 1024 * 1024;
 export const HISTORY_MAX_ENTRIES = 1000;
+export const HISTORY_PRUNE_TARGET_ENTRIES = 900;
 
 const queues = new Map<string, Promise<unknown>>();
+const historyCounts = new Map<string, { count: number; size: number }>();
 
 export interface StorePaths {
     baseDir?: string;
@@ -59,24 +67,85 @@ export async function loadConfig(
     paths: StorePaths = {},
     registry: ModelInfo[] = [],
 ): Promise<ChorusConfigFile> {
-    const parsed = await loadConfigUnchecked(paths);
-    validateConfigFile(parsed, registry);
-    return parsed;
+    const document = await readConfigDocument(paths);
+    validateConfigFile(document.config, registry);
+    if (document.migrated) {
+        await saveConfig(document.config, paths, registry);
+    }
+    return document.config;
 }
 
 export async function loadConfigUnchecked(
     paths: StorePaths = {},
 ): Promise<ChorusConfigFile> {
+    return (await readConfigDocument(paths)).config;
+}
+
+async function readConfigDocument(paths: StorePaths = {}): Promise<{
+    config: ChorusConfigFile;
+    migrated: boolean;
+}> {
     const { configPath } = resolveStorePaths(paths);
     const raw = await readFile(configPath, "utf8");
+    let parsed: unknown;
     try {
-        return JSON.parse(raw) as ChorusConfigFile;
+        parsed = JSON.parse(raw) as unknown;
     } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);
         throw new Error(
             `chorus config at ${configPath} is not valid JSON: ${reason}`,
         );
     }
+    if (!isRecord(parsed)) {
+        throw new Error(`chorus config at ${configPath} must be a JSON object`);
+    }
+    if (parsed.configVersion === CONFIG_VERSION) {
+        return { config: parsed as unknown as ChorusConfigFile, migrated: false };
+    }
+    if (parsed.configVersion === 1) {
+        return {
+            config: migrateConfigV1(parsed as unknown as LegacyChorusConfigFileV1),
+            migrated: true,
+        };
+    }
+    throw new Error(
+        `unsupported chorus configVersion ${String(parsed.configVersion)}; upgrade this extension or migrate config`,
+    );
+}
+
+export function migrateConfigV1(config: LegacyChorusConfigFileV1): ChorusConfigFile {
+    if (!Array.isArray(config.presets)) {
+        throw new Error("config presets must be an array");
+    }
+    return {
+        configVersion: CONFIG_VERSION,
+        activePresetName: config.activePresetName,
+        presets: config.presets.map((preset) => {
+            if (preset.optimizeBeforeAsk !== false) {
+                throw new Error(
+                    `preset ${String(preset.name)} has unsupported optimizeBeforeAsk=true`,
+                );
+            }
+            const { optimizeBeforeAsk: _removed, strategy, ...rest } = preset;
+            return {
+                ...rest,
+                strategy: migrateStrategyV1(strategy),
+            };
+        }),
+    };
+}
+
+function migrateStrategyV1(
+    strategy: LegacyChorusConfigFileV1["presets"][number]["strategy"],
+): ChorusConfigFile["presets"][number]["strategy"] {
+    if (strategy === "A") return "parallel";
+    if (strategy === "B") return "debate";
+    if (strategy === "C") return "rank";
+    throw new Error(`unsupported legacy chorus strategy "${String(strategy)}"`);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 export async function saveConfig(
@@ -88,7 +157,7 @@ export async function saveConfig(
     const { configPath } = resolveStorePaths(paths);
     await withFileMutationQueue(configPath, async () => {
         await mkdir(dirname(configPath), { recursive: true, mode: 0o700 });
-        await atomicWrite(configPath, `${JSON.stringify(config, null, 2)}\n`);
+        await atomicPrivateWrite(configPath, `${JSON.stringify(config, null, 2)}\n`);
     });
 }
 
@@ -113,12 +182,20 @@ export async function appendHistory(
     const { historyPath } = resolveStorePaths(paths);
     await withFileMutationQueue(historyPath, async () => {
         await mkdir(dirname(historyPath), { recursive: true, mode: 0o700 });
-        await appendFile(historyPath, `${JSON.stringify(result)}\n`, {
+        const line = `${JSON.stringify(result)}\n`;
+        const currentSize = await fileSize(historyPath);
+        const cached = historyCounts.get(historyPath);
+        const count = cached?.size === currentSize ? cached.count : await countHistoryEntries(historyPath);
+        await appendFile(historyPath, line, {
             mode: 0o600,
         });
-        await chmodBestEffort(historyPath, 0o600);
-        await pruneHistoryEntries(historyPath, HISTORY_MAX_ENTRIES);
-        await warnIfLargeHistory(historyPath);
+        await chmodPrivateBestEffort(historyPath);
+        const appended = { count: count + 1, size: currentSize + Buffer.byteLength(line) };
+        const retained = appended.count > HISTORY_MAX_ENTRIES
+            ? await pruneHistoryEntries(historyPath, HISTORY_PRUNE_TARGET_ENTRIES)
+            : appended;
+        historyCounts.set(historyPath, retained);
+        await warnIfLargeHistory(historyPath, retained.size);
     });
 }
 
@@ -128,9 +205,26 @@ export async function pruneHistory(
 ): Promise<void> {
     const { historyPath } = resolveStorePaths(paths);
     await withFileMutationQueue(historyPath, async () => {
-        await pruneHistoryEntries(historyPath, maxEntries);
-        await warnIfLargeHistory(historyPath);
+        const retained = await pruneHistoryEntries(historyPath, maxEntries);
+        historyCounts.set(historyPath, retained);
+        await warnIfLargeHistory(historyPath, retained.size);
     });
+}
+
+export async function readHistory(paths: StorePaths = {}, onEntry?: (entry: ChorusResult) => void): Promise<{ entries: ChorusResult[]; corruptLines: number }> {
+    const entries: ChorusResult[] = [];
+    let corruptLines = 0;
+    try {
+        const reader = createInterface({ input: createReadStream(resolveStorePaths(paths).historyPath), crlfDelay: Infinity });
+        for await (const line of reader) {
+            if (!line.trim()) continue;
+            try { const entry = JSON.parse(line) as ChorusResult; entries.push(entry); onEntry?.(entry); }
+            catch { corruptLines += 1; }
+        }
+    } catch (error) {
+        if ((error as { code?: string }).code !== "ENOENT") throw error;
+    }
+    return { entries, corruptLines };
 }
 
 export async function loadJsonFile<T>(path: string, fallback: T): Promise<T> {
@@ -149,7 +243,7 @@ export async function saveJsonFile(
 ): Promise<void> {
     await withFileMutationQueue(path, async () => {
         await mkdir(dirname(path), { recursive: true, mode: 0o700 });
-        await atomicWrite(path, `${JSON.stringify(value, null, 2)}\n`);
+        await atomicPrivateWrite(path, `${JSON.stringify(value, null, 2)}\n`);
     });
 }
 
@@ -186,25 +280,9 @@ export async function withFileMutationQueue<T>(
     return await next;
 }
 
-async function atomicWrite(path: string, text: string): Promise<void> {
-    const tmp = `${path}.${process.pid}.${Date.now()}.tmp`;
-    await writeFile(tmp, text, { mode: 0o600 });
-    await chmodBestEffort(tmp, 0o600);
-    await rename(tmp, path);
-    await chmodBestEffort(path, 0o600);
-}
-
-async function chmodBestEffort(path: string, mode: number): Promise<void> {
+async function warnIfLargeHistory(path: string, knownSize?: number): Promise<void> {
     try {
-        await chmod(path, mode);
-    } catch {
-        // chmod can fail on non-POSIX filesystems; validation should not depend on it.
-    }
-}
-
-async function warnIfLargeHistory(path: string): Promise<void> {
-    try {
-        const size = (await stat(path)).size;
+        const size = knownSize ?? (await stat(path)).size;
         if (size > HISTORY_WARNING_BYTES) {
             console.warn(
                 `chorus history is ${(size / 1024 / 1024).toFixed(1)}MB at ${path}; consider archiving old entries`,
@@ -218,16 +296,37 @@ async function warnIfLargeHistory(path: string): Promise<void> {
 async function pruneHistoryEntries(
     path: string,
     maxEntries: number = HISTORY_MAX_ENTRIES,
-): Promise<void> {
+): Promise<{ count: number; size: number }> {
     try {
         const raw = await readFile(path, "utf8");
         const lines = raw.split("\n");
         const nonEmpty = lines.filter((line) => line.trim() !== "");
-        if (nonEmpty.length <= maxEntries) return;
+        if (nonEmpty.length <= maxEntries) return { count: nonEmpty.length, size: Buffer.byteLength(raw) };
         const kept = nonEmpty.slice(nonEmpty.length - maxEntries);
-        await atomicWrite(path, `${kept.join("\n")}\n`);
-        await chmodBestEffort(path, 0o600);
+        const text = `${kept.join("\n")}\n`;
+        await atomicPrivateWrite(path, text);
+        return { count: kept.length, size: Buffer.byteLength(text) };
     } catch {
         // Retention pruning must not affect the run.
+        return { count: 0, size: await fileSize(path).catch(() => 0) };
+    }
+}
+
+async function countHistoryEntries(path: string): Promise<number> {
+    let count = 0;
+    try {
+        const reader = createInterface({ input: createReadStream(path), crlfDelay: Infinity });
+        for await (const line of reader) if (line.trim()) count += 1;
+    } catch (error) {
+        if ((error as { code?: string }).code !== "ENOENT") throw error;
+    }
+    return count;
+}
+
+async function fileSize(path: string): Promise<number> {
+    try { return (await stat(path)).size; }
+    catch (error) {
+        if ((error as { code?: string }).code === "ENOENT") return 0;
+        throw error;
     }
 }

@@ -1,17 +1,34 @@
 import type { ProviderAdapter, TokenUsage } from "../types.js";
 
-export function getProviderAdapter(apiKind: string): ProviderAdapter {
-    const adapter = ADAPTERS.get(apiKind);
-    if (adapter) return adapter;
-    // Prefer explicit matches over broad substring detection so a mislabeled
-    // apiKind cannot silently route credentials to the wrong request shape.
-    const normalized = apiKind.toLowerCase();
-    if (normalized.startsWith("anthropic"))
-        return anthropicMessagesAdapter(apiKind);
-    if (normalized.startsWith("openai") || normalized.startsWith("chat"))
-        return openAiChatAdapter(apiKind);
-    return genericJsonAdapter(apiKind);
+export interface ProviderCapabilities {
+    streaming: boolean;
+    structuredOutput: boolean;
+    reasoning: boolean;
+    usage: boolean;
+    cancellation: boolean;
 }
+
+export class ProviderAdapterRegistry {
+    private readonly entries = new Map<string, { adapter: ProviderAdapter; capabilities: ProviderCapabilities }>();
+    register(adapter: ProviderAdapter, capabilities: ProviderCapabilities): void {
+        if (this.entries.has(adapter.apiKind)) throw new Error(`provider adapter already registered: ${adapter.apiKind}`);
+        this.entries.set(adapter.apiKind, { adapter, capabilities });
+    }
+    get(apiKind: string): ProviderAdapter {
+        const entry = this.entries.get(apiKind);
+        if (!entry) throw new Error(`unknown provider api kind "${apiKind}"; register an adapter before use`);
+        return entry.adapter;
+    }
+    capabilities(apiKind: string): ProviderCapabilities { return this.entries.get(apiKind)?.capabilities ?? (() => { throw new Error(`unknown provider api kind "${apiKind}"`); })(); }
+    kinds(): string[] { return [...this.entries.keys()].sort(); }
+}
+
+export function getProviderAdapter(apiKind: string): ProviderAdapter {
+    return providerAdapters.get(apiKind);
+}
+
+export function registerProviderAdapter(adapter: ProviderAdapter, capabilities: ProviderCapabilities): void { providerAdapters.register(adapter, capabilities); }
+export function getProviderCapabilities(apiKind: string): ProviderCapabilities { return providerAdapters.capabilities(apiKind); }
 
 /**
  * Rejects non-https endpoints and link-local / cloud-metadata IPs before any
@@ -118,7 +135,7 @@ function asNumber(value: unknown): number {
 function openAiChatAdapter(apiKind: string): ProviderAdapter {
     return {
         apiKind,
-        buildRequest: ({ resolved, prompt, systemPrompt, signal }) => ({
+        buildRequest: ({ resolved, prompt, systemPrompt, signal, structuredOutput }) => ({
             url: resolved.endpoint,
             init: {
                 method: "POST",
@@ -133,6 +150,7 @@ function openAiChatAdapter(apiKind: string): ProviderAdapter {
                             : []),
                         { role: "user", content: prompt },
                     ],
+                    ...(structuredOutput ? { response_format: structuredResponseFormat() } : {}),
                 }),
             },
         }),
@@ -251,3 +269,42 @@ const ADAPTERS = new Map<string, ProviderAdapter>([
     ["anthropic-messages", anthropicMessagesAdapter("anthropic-messages")],
     ["generic-json", genericJsonAdapter("generic-json")],
 ]);
+
+function structuredResponseFormat(): object {
+    return {
+        type: "json_schema",
+        json_schema: {
+            name: "chorus_synthesis",
+            strict: true,
+            schema: {
+                type: "object",
+                additionalProperties: false,
+                required: ["markdown", "structured"],
+                properties: {
+                    markdown: { type: "string" },
+                    structured: {
+                        type: "object",
+                        additionalProperties: false,
+                        required: ["version", "answer", "claims", "disagreements", "confidence", "unresolvedQuestions"],
+                        properties: {
+                            version: { const: 1 }, answer: { type: "string" },
+                            claims: { type: "array", items: { type: "object", additionalProperties: false, required: ["text", "evidenceIds"], properties: { text: { type: "string" }, evidenceIds: { type: "array", items: { type: "string" } } } } },
+                            disagreements: { type: "array", items: { type: "string" } }, confidence: { type: ["number", "null"] }, unresolvedQuestions: { type: "array", items: { type: "string" } },
+                        },
+                    },
+                },
+            },
+        },
+    };
+}
+
+const providerAdapters = new ProviderAdapterRegistry();
+for (const adapter of ADAPTERS.values()) {
+    providerAdapters.register(adapter, {
+        streaming: false,
+        structuredOutput: adapter.apiKind.startsWith("openai"),
+        reasoning: true,
+        usage: true,
+        cancellation: true,
+    });
+}
