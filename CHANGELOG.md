@@ -5,6 +5,77 @@ All notable changes to Chorus are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-07-20
+
+### Changed
+
+- Config v2 migrates legacy strategy IDs to stable identifiers and removes unsupported `optimizeBeforeAsk`.
+- `runChorus` delegates bounded voice work to shared execution, scheduling, budget, retry, evidence, and persistence contracts.
+- Review profiles no longer impose five/fifteen-minute wall-clock deadlines. Review subagents instead reset the preset timeout whenever stdout or stderr activity arrives, and stalled executions retain partial context for a no-tool finalization attempt and same-provider fallback.
+- Review reports default to Simplified Chinese across reviewer prompts, integration output, Markdown, and GitHub rendering; interactive Settings, `--language en`, and Review DSL `language: en` retain explicit English output.
+- Quick Review reserves execution capacity per stage so Cross Review cannot consume the Global Devil or Integrator slots; excess challenge candidates are recorded as omitted.
+- Quick and Deep Review now bound findings per expert and per Global Devil pass, prioritize challenge candidates deterministically, and run Cross Review through the provider-aware scheduler.
+- Global voice and reviewer concurrency now defaults to five; explicit preset and per-provider limits remain authoritative.
+- Review coverage now distinguishes usable and empty-result roles, labels cited/explicit paths as files represented in the report instead of exhaustive inspection coverage, and shows units for per-stage counts; decisions and CI completeness use usable review signal.
+- Review coverage now records planned, attempted, usable, failed, and omitted work per stage; malformed or missing Global Devil challenges produce partial coverage.
+- Source citation verification no longer automatically accepts a Finding. Independent support promotes its verified evidence into a source-backed proposal, and structured Integrator resolutions can dispute or reject it after validating counter-evidence.
+- The Integrator can close duplicated prior questions answered by normalized evidence, while deterministic coverage gaps remain in the final report.
+- Reviewer normalization records now stay in stage artifacts, while reports expose bounded execution diagnostics separately from user-facing unresolved questions.
+- Preset execution options are derived through one shared mapping for Ask, Agent, tool, and batch runs; batch still isolates session history while honoring concurrency, permissions, timeouts, budgets, and cache policy.
+- Direct and main-agent synthesis now share successful-output selection and bounded evidence preparation without coupling their execution mechanisms.
+
+### Fixed
+
+- Preserve subagent partial output, activity, usage, and cost when Pi times out or exits without assistant text instead of discarding recoverable work.
+- Normalize safe, common reviewer JSON shape deviations before strict source evidence validation, and skip Global Devil when no findings exist to challenge.
+- Mark incomplete Review jobs as `degraded`, show execution completeness in Markdown, and report end-to-end wall-clock duration instead of summing successful nodes only.
+- Normalize recoverable Cross Review and Global Devil evidence shapes before strict validation, including missing IDs and line-range aliases.
+- Detect cited sources that change during a Review, mark their evidence stale, and degrade coverage; diff reviews also persist the exact owner-only `review-scope.diff` artifact.
+- Coalesce subagent progress updates, decode split UTF-8 safely, and finalize trailing NDJSON without retaining and reparsing all stdout.
+- Evict RunCache entries by filesystem modification time without reading and parsing every cached value, clean corrupt entries when they are read, and avoid sort work while the cache is within its limit.
+- Expand the Pi 0.80 credential environment contract passed to allowlisted subagents, including MiniMax China, Hugging Face, GitHub Copilot, Vertex AI, temporary AWS credentials, and container/web-identity AWS authentication.
+- Preserve bounded activity and recovery context in successful Review finalization artifacts instead of retaining it only for terminal failures.
+- Use pi-ai's exported model, context, options, and usage contracts at the compatibility boundary with runtime model-shape validation.
+- Recover unambiguous reviewer evidence with missing kinds or numeric line arrays, isolate invalid evidence/Finding items, and classify remaining schema failures as `output-format` instead of dropping an entire reviewer response.
+- Keep Review role status `running` until normalized output passes validation; completion now preserves reviewer errors and renders intentionally omitted stages such as Global Devil as `skipped` rather than `error`.
+- Reserve input-token, output-token, and cost capacity for Global Devil and Integrator, with dimension-specific budget diagnostics, so verbose earlier stages cannot starve terminal review work.
+- Isolate malformed Global Devil challenges, normalize supported verdict aliases, and recover valid Devil-created findings without discarding sibling output.
+- Require non-empty, entirely verified evidence before a Finding can become verified; mixed stale or unavailable evidence remains unsupported.
+- Flush terminal and canceled job state before background runners return, and track detached subagent process groups for best-effort cleanup on normal parent exit.
+- Bound repository scope hashing with canonical containment, streaming SHA-256, and a four-worker pool; avoid full history reads until retention or external mutation requires recounting.
+- Apply endpoint safety checks to registry-managed Pi model calls before authentication or invocation, and constrain the pi-ai peer compatibility range to `>=0.80.6 <0.81.0`.
+- Guarantee dedicated Cross Review resource capacity even when concurrent Independent Review exceeds its target allocation.
+- Bound Evidence reads to 2 MiB plus one byte, reuse canonical file content within a set, and validate files with four ordered workers.
+- Retain only a 256 KiB subagent stderr tail with omitted-byte accounting and credential redaction.
+- Coalesce text-only Review progress snapshots at 500 ms with one active write and one latest dirty state; terminal flush propagates persistence failures.
+- Prefer structured HTTP status/provider codes for retry classification and reject automatic redirects in raw direct API calls.
+- Register built-in strategies, Review workflows/stages, and renderers explicitly and idempotently so `sideEffects: false` consumers retain them after tree-shaking.
+- Treat source-inspection-only reviewer output as a coverage failure and try the next configured fallback model; bounded recovery can retain up to four source citations for one finding.
+- Collapse empty-role inspection gaps into one deterministic final-report coverage message while preserving raw per-role questions in stage artifacts.
+- Use one owner-only atomic replacement primitive for config/store snapshots, run and Review artifacts, CI summaries, and resumable batch checkpoints/reports.
+- Continue independent-review fallback across natural Chinese source-inspection gap wording, and collapse every raw question from an empty role into the deterministic coverage summary.
+- Preserve a cross-provider committee fallback within the two-candidate bound and transfer scheduler permits when a running reviewer changes provider, so fallback diversity does not bypass provider concurrency limits.
+- Mark Settings model overrides as explicitly pinned so committee fallback augmentation cannot silently replace the selected per-role model contract; DSL policies retain their existing fallback semantics.
+- Skip prompt serialization, SHA-256 cache-key generation, and cache get/set calls entirely when run caching is disabled by policy.
+- Snapshot stage outputs before later challenges mutate shared Findings, and clone resumed Findings before rerunning an incomplete stage prefix.
+- Include the resolved model endpoint in RunCache identity, delete TTL-expired entries on read, and avoid stale hits after endpoint changes.
+- Relocate uniquely matching code evidence across common indentation and blank-line differences, and retry an empty source inspection once before no-tool finalization.
+- Degrade Review execution and CI completeness on measured token/cost overruns, and search Windows `PATHEXT` entries individually when resolving Pi.
+
+### Added
+
+- Strategy and provider registries, typed events and metrics, routing, budgets, retry/fallback, cache, streaming, batch execution, quality evaluation, and resumable checkpoints.
+- Streaming history list/search/export, atomic artifact writes, private subagent profiles, and expanded integration/security coverage.
+- A versioned Review Engine domain with expert roles, source-backed findings, bounded code/design/architecture workflows, cross-review, Global Devil challenge, and normalized decision reports.
+- `/chorus review`, `chorus_review`, quick/deep profiles, constrained JSON/YAML review definitions, resumable review artifacts, Markdown/JSON/GitHub/SARIF renderers, git diff scope, and CI policy exit codes.
+- Seeded review evaluation fixtures, transparent quality metrics, and a same-model single-reviewer baseline.
+- Bundler regression coverage that executes advanced strategies and resolves every built-in Review workflow after esbuild tree-shaking.
+
+### Security
+
+- Conductor evidence is escaped and context-bounded; child environments use a centralized Pi credential allowlist and write-capable profiles require explicit opt-in.
+- Reject Git base/head values that could be interpreted as options at CLI, request-validation, and final argv boundaries.
+
 ## [0.1.3] - 2026-07-11
 
 ### Fixed
