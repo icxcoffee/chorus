@@ -184,6 +184,36 @@ pi -e npm:@icxcoffee/chorus
 
 安装后，`/chorus` 斜杠命令和 `chorus_answer` 工具即可在任意 Pi 会话中使用。
 
+### Codex 与 Claude Code Skill
+
+一行命令把包内 Chorus Agent Skill 安装到当前用户的 Codex 与 Claude Code，之后所有项目都可以使用：
+
+```bash
+npx --yes --package=@icxcoffee/chorus@latest chorus-skill-install --scope user
+```
+
+在新机器上，一行 shell 命令同时安装 Pi 扩展和用户级 Skill：
+
+```bash
+pi install npm:@icxcoffee/chorus && npx --yes --package=@icxcoffee/chorus@latest chorus-skill-install --scope user
+```
+
+更新两个用户级安装时加 `--force`。如果只想把可提交的副本安装到某个项目：
+
+```bash
+cd /path/to/target-project
+npx --yes --package=@icxcoffee/chorus@latest chorus-skill-install .
+```
+
+用户级安装写入 `$CODEX_HOME/skills`（默认 `~/.codex/skills`）和 `$CLAUDE_CONFIG_DIR/skills`（默认 `~/.claude/skills`）。项目级安装生成 `.agents/skills/chorus-agent` 和 `.claude/skills/chorus-agent`，可随目标项目一起提交。从长期存在的本地 Chorus 仓库开发时，可以先构建再使用 link 模式，让 Skill 修改立即被两个宿主共享：
+
+```bash
+npm run build
+node /path/to/chorus/dist/cli/install-skill.js /path/to/target-project --mode link
+```
+
+在 Codex 中使用 `$chorus-agent`，在 Claude Code 中使用 `/chorus-agent`。
+
 ## 开发
 
 ```bash

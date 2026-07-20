@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 import { readFile } from "node:fs/promises";
-import { pathToFileURL } from "node:url";
 import { evaluateReviewPolicy, REVIEW_EXIT_CODES, writeReviewCiSummary } from "../review/ci.js";
 import { parseReviewReport } from "../review/validation.js";
 import type { FindingSeverity } from "../review/contracts.js";
+import { isMainModule } from "./main.js";
 
 export async function runReviewPolicyCli(args: string[]): Promise<number> {
     const [reportPath, ...options] = args;
@@ -38,6 +38,6 @@ export async function runReviewPolicyCli(args: string[]): Promise<number> {
     }
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (await isMainModule(import.meta.url, process.argv[1])) {
     process.exitCode = await runReviewPolicyCli(process.argv.slice(2));
 }

@@ -7,18 +7,20 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
-    "chorus-review-policy": "./dist/cli/review-policy.js"
+    "chorus-review-policy": "./dist/cli/review-policy.js",
+    "chorus-skill-install": "./dist/cli/install-skill.js"
   },
   "files": [
     "dist",
     "examples",
+    "skills",
     "README.md",
     "README.zh-CN.md",
     "CHANGELOG.md",
     "LICENSE"
   ],
   "scripts": {
-    "build": "rm -rf dist && tsc -p tsconfig.build.json && chmod +x dist/cli/review-policy.js",
+    "build": "rm -rf dist && tsc -p tsconfig.build.json && chmod +x dist/cli/review-policy.js dist/cli/install-skill.js",
     "lint": "node scripts/lint.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",

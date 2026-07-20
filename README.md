@@ -200,6 +200,36 @@ pi -e npm:@icxcoffee/chorus
 
 Once installed, the `/chorus` slash commands and the `chorus_answer` tool are available in any Pi session.
 
+### Codex and Claude Code Skill
+
+Install the packaged Chorus Agent Skill for the current user with one command. This makes it available in every Codex and Claude Code project:
+
+```bash
+npx --yes --package=@icxcoffee/chorus@latest chorus-skill-install --scope user
+```
+
+For a new machine, install both the Pi extension and the user-level Skill in one shell command:
+
+```bash
+pi install npm:@icxcoffee/chorus && npx --yes --package=@icxcoffee/chorus@latest chorus-skill-install --scope user
+```
+
+Rerun with `--force` to update both user installations. To install a portable copy into one project instead:
+
+```bash
+cd /path/to/target-project
+npx --yes --package=@icxcoffee/chorus@latest chorus-skill-install .
+```
+
+User scope writes under `$CODEX_HOME/skills` (default `~/.codex/skills`) and `$CLAUDE_CONFIG_DIR/skills` (default `~/.claude/skills`). Project scope creates `.agents/skills/chorus-agent` and `.claude/skills/chorus-agent`, which can be committed with the target project. When developing from a persistent local Chorus checkout, build once and use link mode so Skill edits are immediately shared:
+
+```bash
+npm run build
+node /path/to/chorus/dist/cli/install-skill.js /path/to/target-project --mode link
+```
+
+Invoke it as `$chorus-agent` in Codex or `/chorus-agent` in Claude Code.
+
 ## Development
 
 ```bash

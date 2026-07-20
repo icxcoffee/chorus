@@ -1,7 +1,7 @@
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 
-const roots = ["src", "tests", "scripts"];
+const roots = ["src", "tests", "scripts", "skills"];
 const violations = [];
 const maxLineRules = [
   {

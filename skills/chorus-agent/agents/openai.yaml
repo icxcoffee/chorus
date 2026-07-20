@@ -1,0 +1,4 @@
+interface:
+  display_name: "Chorus Agent"
+  short_description: "Integrate Chorus with Codex or Claude"
+  default_prompt: "Use $chorus-agent to run a Chorus code audit and return the verified final report."
